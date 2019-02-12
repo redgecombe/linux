@@ -195,6 +195,9 @@ static void __init probe_page_size_mask(void)
 		__supported_pte_mask |= _PAGE_GLOBAL;
 	}
 
+	if (pgtable_kvmxo_enabled())
+		__supported_pte_mask |= _PAGE_NR;
+
 	/* By the default is everything supported: */
 	__default_kernel_pte_mask = __supported_pte_mask;
 	/* Except when with PTI where the kernel is mostly non-Global: */

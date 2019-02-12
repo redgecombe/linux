@@ -26,6 +26,7 @@
 #include <asm/proto.h>
 #include <asm/pat.h>
 #include <asm/set_memory.h>
+#include <uapi/linux/kvm_para.h>
 
 #include "mm_internal.h"
 
@@ -1980,12 +1981,26 @@ EXPORT_SYMBOL(set_memory_nx);
 
 int set_memory_ro(unsigned long addr, int numpages)
 {
-	return change_page_attr_clear(&addr, numpages, __pgprot(_PAGE_RW), 0);
+	return change_page_attr_clear(&addr, numpages,
+				      __pgprot(_PAGE_RW | _PAGE_NR), 0);
 }
+
+#ifdef CONFIG_ARCH_HAS_NR
+int set_memory_nr(unsigned long addr, int numpages)
+{
+	return change_page_attr_set(&addr, numpages, __pgprot(_PAGE_NR), 0);
+}
+
+int set_memory_r(unsigned long addr, int numpages)
+{
+	return change_page_attr_clear(&addr, numpages, __pgprot(_PAGE_NR), 0);
+}
+#endif
 
 int set_memory_rw(unsigned long addr, int numpages)
 {
-	return change_page_attr_set(&addr, numpages, __pgprot(_PAGE_RW), 0);
+	return change_page_attr_set_clr(&addr, numpages, __pgprot(_PAGE_RW),
+				        __pgprot(_PAGE_NR), 0, 0, NULL);
 }
 
 int set_memory_np(unsigned long addr, int numpages)
