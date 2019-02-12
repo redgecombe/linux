@@ -1934,9 +1934,13 @@ void module_disable_ro(const struct module *mod)
 	if (!rodata_enabled)
 		return;
 
+	if (!mod->noxo)
+		frob_text(&mod->core_layout, set_memory_r);
 	frob_text(&mod->core_layout, set_memory_rw);
 	frob_rodata(&mod->core_layout, set_memory_rw);
 	frob_ro_after_init(&mod->core_layout, set_memory_rw);
+	if (!mod->noxo)
+		frob_text(&mod->init_layout, set_memory_r);
 	frob_text(&mod->init_layout, set_memory_rw);
 	frob_rodata(&mod->init_layout, set_memory_rw);
 }
@@ -1950,12 +1954,14 @@ void module_enable_ro(const struct module *mod, bool after_init)
 	set_vm_flush_reset_perms(mod->init_layout.base);
 	frob_text(&mod->core_layout, set_memory_ro);
 	frob_text(&mod->core_layout, set_memory_x);
-
+	if (!mod->noxo)
+		frob_text(&mod->core_layout, set_memory_nr);
 	frob_rodata(&mod->core_layout, set_memory_ro);
 
 	frob_text(&mod->init_layout, set_memory_ro);
 	frob_text(&mod->init_layout, set_memory_x);
-
+	if (!mod->noxo)
+		frob_text(&mod->init_layout, set_memory_nr);
 	frob_rodata(&mod->init_layout, set_memory_ro);
 
 	if (after_init)
@@ -1983,15 +1989,18 @@ void set_all_modules_text_rw(void)
 	list_for_each_entry_rcu(mod, &modules, list) {
 		if (mod->state == MODULE_STATE_UNFORMED)
 			continue;
-
+		if (!mod->noxo)
+			frob_text(&mod->core_layout, set_memory_r);
 		frob_text(&mod->core_layout, set_memory_rw);
+		if (!mod->noxo)
+			frob_text(&mod->init_layout, set_memory_r);
 		frob_text(&mod->init_layout, set_memory_rw);
 	}
 	mutex_unlock(&module_mutex);
 }
 
 /* Iterate through all modules and set each module's text as RO */
-void set_all_modules_text_ro(void)
+static void set_all_modules_text(bool ro)
 {
 	struct module *mod;
 
@@ -2009,12 +2018,45 @@ void set_all_modules_text_ro(void)
 			mod->state == MODULE_STATE_GOING)
 			continue;
 
-		frob_text(&mod->core_layout, set_memory_ro);
-		frob_text(&mod->init_layout, set_memory_ro);
+		if (ro)
+			frob_text(&mod->core_layout, set_memory_ro);
+		if (!mod->noxo)
+			frob_text(&mod->core_layout, set_memory_nr);		
+		if (ro)
+			frob_text(&mod->init_layout, set_memory_ro);
+		if (!mod->noxo)
+			frob_text(&mod->init_layout, set_memory_nr);
 	}
 	mutex_unlock(&module_mutex);
 }
+
+void set_all_modules_text_ro(void)
+{
+	set_all_modules_text(false);
+}
+
+/* Iterate through all modules and set each module's text as NR */
+void set_all_modules_text_nr(void)
+{
+	set_all_modules_text(true);
+}
+
+static void disable_ro_nx(const struct module_layout *layout, bool noxo)
+{
+	if (rodata_enabled) {
+		if (noxo)
+			frob_text(layout, set_memory_r);
+		frob_text(layout, set_memory_rw);
+		frob_rodata(layout, set_memory_rw);
+		frob_ro_after_init(layout, set_memory_rw);
+	}
+	frob_rodata(layout, set_memory_x);
+	frob_ro_after_init(layout, set_memory_x);
+	frob_writable_data(layout, set_memory_x);
+}
+
 #else
+static void disable_ro_nx(const struct module_layout *layout, bool noxo) { }
 static void module_enable_nx(const struct module *mod) { }
 #endif
 
@@ -2151,6 +2193,8 @@ static void free_module(struct module *mod)
 	mutex_unlock(&module_mutex);
 
 	/* This may be empty, but that's OK */
+
+	disable_ro_nx(&mod->init_layout, mod->noxo);
 	module_arch_freeing_init(mod);
 	module_memfree(mod->init_layout.base);
 	kfree(mod->args);
@@ -2160,6 +2204,8 @@ static void free_module(struct module *mod)
 	lockdep_free_key_range(mod->core_layout.base, mod->core_layout.size);
 
 	/* Finally, free the core (containing the module structure) */
+
+	disable_ro_nx(&mod->core_layout, mod->noxo);
 	module_memfree(mod->core_layout.base);
 }
 
@@ -2824,6 +2870,12 @@ static int copy_chunked_from_user(void *dst, const void __user *usrc, unsigned l
 	return 0;
 }
 
+static void check_modinfo_noxo(struct module *mod, struct load_info *info)
+{
+	if (get_modinfo(info, "noxo"))
+		mod->noxo = true;
+}
+
 #ifdef CONFIG_LIVEPATCH
 static int check_modinfo_livepatch(struct module *mod, struct load_info *info)
 {
@@ -3027,6 +3079,8 @@ static int check_modinfo(struct module *mod, struct load_info *info, int flags)
 	err = check_modinfo_livepatch(mod, info);
 	if (err)
 		return err;
+
+	check_modinfo_noxo(mod, info);
 
 	/* Set up license info based on the info section */
 	set_license(mod, get_modinfo(info, "license"));
@@ -3509,6 +3563,7 @@ static noinline int do_init_module(struct module *mod)
 #endif
 	module_enable_ro(mod, true);
 	mod_tree_remove_init(mod);
+	disable_ro_nx(&mod->init_layout, mod->noxo);
 	module_arch_freeing_init(mod);
 	mod->init_layout.base = NULL;
 	mod->init_layout.size = 0;

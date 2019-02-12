@@ -481,6 +481,8 @@ struct module {
 	struct klp_modinfo *klp_info;
 #endif
 
+	bool noxo;
+
 #ifdef CONFIG_MODULE_UNLOAD
 	/* What modules depend on me? */
 	struct list_head source_list;
@@ -844,11 +846,13 @@ extern int module_sysfs_initialized;
 #ifdef CONFIG_STRICT_MODULE_RWX
 extern void set_all_modules_text_rw(void);
 extern void set_all_modules_text_ro(void);
+extern void set_all_modules_text_nr(void);
 extern void module_enable_ro(const struct module *mod, bool after_init);
 extern void module_disable_ro(const struct module *mod);
 #else
 static inline void set_all_modules_text_rw(void) { }
 static inline void set_all_modules_text_ro(void) { }
+static inline void set_all_modules_text_nr(void) { }
 static inline void module_enable_ro(const struct module *mod, bool after_init) { }
 static inline void module_disable_ro(const struct module *mod) { }
 #endif
