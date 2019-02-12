@@ -13,10 +13,23 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/printk.h>
+#include <linux/random.h>
+
+
+int crash_test(void)
+{
+	printk("About to Crash!!!\n");
+	printk("%lu\n", *((unsigned long *)&crash_test));
+	printk("After crash!!!\n");
+	return 0;
+}
+EXPORT_SYMBOL(crash_test);
 
 static int __init test_module_init(void)
 {
 	pr_warn("Hello, world\n");
+
+	crash_test();
 
 	return 0;
 }
