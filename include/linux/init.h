@@ -155,6 +155,10 @@ extern bool rodata_enabled;
 void mark_rodata_ro(void);
 #endif
 
+#ifdef CONFIG_ARCH_HAS_NR
+void mark_xdata_xo(void);
+#endif
+
 extern void (*late_time_init)(void);
 
 extern bool initcall_debug;

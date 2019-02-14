@@ -1346,6 +1346,18 @@ void mark_rodata_ro(void)
 	debug_checkwx();
 }
 
+void mark_xdata_xo(void)
+{
+	unsigned long start = PFN_ALIGN(_text);
+	unsigned long end = PFN_ALIGN(_etext);
+	unsigned long size = end - start;
+
+	printk(KERN_INFO "Read protecting the kernel executable data: %luk\n",
+	       (end - start) >> 10);
+
+	set_memory_nr(start, size >> PAGE_SHIFT);
+}
+
 int kern_addr_valid(unsigned long addr)
 {
 	unsigned long above = ((long)addr) >> __VIRTUAL_MASK_SHIFT;

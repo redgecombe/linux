@@ -1079,6 +1079,14 @@ void __weak free_initmem(void)
 {
 	free_initmem_default(POISON_FREE_INITMEM);
 }
+#ifdef CONFIG_XO_TEXT
+static void mark_execonly(void)
+{
+	mark_xdata_xo();
+}
+#else /* CONFIG_ARCH_HAS_NR */
+static void mark_execonly(void) {}
+#endif /* CONFIG_ARCH_HAS_NR */
 
 static int __ref kernel_init(void *unused)
 {
@@ -1090,6 +1098,7 @@ static int __ref kernel_init(void *unused)
 	ftrace_free_init_mem();
 	free_initmem();
 	mark_readonly();
+	mark_execonly();
 
 	/*
 	 * Kernel mappings are now finalized - update the userspace page-table
