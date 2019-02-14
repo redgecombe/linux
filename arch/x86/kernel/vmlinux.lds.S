@@ -143,6 +143,14 @@ SECTIONS
 #endif
 	} :text = 0x9090
 
+	/*
+	 * If the kernel text is XO, make sure no data shares the page with the
+	 * kernel text.
+	 */
+#ifdef CONFIG_XO_TEXT
+ 	. = ALIGN(PAGE_SIZE);
+#endif
+
 	/* End of text section */
 	_etext = .;
 

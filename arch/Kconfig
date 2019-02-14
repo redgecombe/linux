@@ -872,6 +872,9 @@ config STRICT_MODULE_RWX
 	  and non-text memory will be made non-executable. This provides
 	  protection against certain security exploits (e.g. writing to text)
 
+config STRICT_KERNEL_NR
+	bool "Align kernel rodata so all kernel text can be set not readable"
+
 # select if the architecture provides an asm/dma-direct.h header
 config ARCH_HAS_PHYS_TO_DMA
 	bool
