@@ -795,6 +795,37 @@ config KVM_GUEST
 	  underlying device model, the host provides the guest with
 	  timing infrastructure such as time of day, and system time
 
+config XO_TEXT
+	bool "Set kernel text as execute only"
+	depends on KVM_XO && !HIBERNATION
+
+config ARCH_HAS_NR
+	bool "Architecture supports not readable memory"
+	depends on KVM_XO
+
+config KVM_XO
+	bool "Support for KVM based execute only memory permissions"
+	select STRICT_KERNEL_NR
+	select ARCH_HAS_NR
+	select DYNAMIC_PHYSICAL_MASK
+	select XO_TEXT
+	depends on KVM_GUEST && X86_64
+	---help---
+	  This option enables support for execute only memory for KVM guests. If
+	  support from the underlying VMM is not detected at boot, this
+	  capability will automatically disable. By default this will only
+	  provide warnings for read violations of kernel text.
+
+	  If you are unsure how to answer this question, answer Y.
+
+config KVM_XO_KERNEL_ENFORCE
+	bool "Strictly disallow reading of kernel text"
+	depends on KVM_XO
+	---help---
+	  This makes kernel text violations trigger an oops intead of just
+	  logging the violation. This enhancement can be turned off at runtime
+	  by passing xoenforce=[off|on].
+
 config PVH
 	bool "Support for running PVH guests"
 	---help---
