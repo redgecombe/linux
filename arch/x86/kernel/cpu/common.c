@@ -859,6 +859,11 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 		}
 	}
 
+	eax = cpuid_eax(0x40000000);
+	c->extended_cpuid_level = eax;
+	if (c->extended_cpuid_level >= 0x40000030)
+		c->x86_capability[CPUID_4000_0030_EAX] = cpuid_eax(0x40000030);
+
 	/* AMD-defined flags: level 0x80000001 */
 	eax = cpuid_eax(0x80000000);
 	c->extended_cpuid_level = eax;

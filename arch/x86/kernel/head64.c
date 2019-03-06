@@ -52,6 +52,11 @@ unsigned int ptrs_per_p4d __ro_after_init = 1;
 EXPORT_SYMBOL(ptrs_per_p4d);
 #endif
 
+#ifdef CONFIG_KVM_XO
+unsigned int __pgtable_kvmxo_enabled __ro_after_init;
+unsigned int __pgtable_kvmxo_bit __ro_after_init;
+#endif /* CONFIG_KVM_XO */
+
 #ifdef CONFIG_DYNAMIC_MEMORY_LAYOUT
 unsigned long page_offset_base __ro_after_init = __PAGE_OFFSET_BASE_L4;
 EXPORT_SYMBOL(page_offset_base);
@@ -73,12 +78,14 @@ static unsigned long __head *fixup_long(void *ptr, unsigned long physaddr)
 	return fixup_pointer(ptr, physaddr);
 }
 
-#ifdef CONFIG_X86_5LEVEL
+#if defined(CONFIG_X86_5LEVEL) || defined(CONFIG_KVM_XO)
 static unsigned int __head *fixup_int(void *ptr, unsigned long physaddr)
 {
 	return fixup_pointer(ptr, physaddr);
 }
+#endif
 
+#ifdef CONFIG_X86_5LEVEL
 static bool __head check_la57_support(unsigned long physaddr)
 {
 	/*
@@ -104,6 +111,33 @@ static bool __head check_la57_support(unsigned long physaddr)
 }
 #endif
 
+#ifdef CONFIG_KVM_XO
+static void __head check_kvmxo_support(unsigned long physaddr)
+{
+	unsigned long physbits;
+
+	if ((native_cpuid_eax(0x40000000) < 0x40000030) ||
+	    !(native_cpuid_eax(0x40000030) & (1 << (X86_FEATURE_KVM_XO & 31))))
+		return;
+
+	if (native_cpuid_eax(0x80000000) < 0x80000008)
+		return;
+	
+	physbits = native_cpuid_eax(0x80000008) & 0xff;
+
+	/*
+	 * If KVM XO is active, the top physical address bit is the permisison
+	 * bit, so zero it in the mask.
+	 */	
+	physical_mask &= ~(1UL << physbits);
+
+	*fixup_int(&__pgtable_kvmxo_enabled, physaddr) = 1;
+	*fixup_int(&__pgtable_kvmxo_bit, physaddr) = physbits;
+}
+#else /* CONFIG_KVM_XO */
+static void __head check_kvmxo_support(unsigned long physaddr) { }
+#endif /* CONFIG_KVM_XO */
+
 /* Code in __startup_64() can be relocated during execution, but the compiler
  * doesn't have to generate PC-relative relocations when accessing globals from
  * that function. Clang actually does not generate them, which leads to
@@ -126,6 +160,8 @@ unsigned long __head __startup_64(unsigned long physaddr,
 	unsigned int *next_pgt_ptr;
 
 	la57 = check_la57_support(physaddr);
+
+	check_kvmxo_support(physaddr);
 
 	/* Is the address too large? */
 	if (physaddr >> MAX_PHYSMEM_BITS)

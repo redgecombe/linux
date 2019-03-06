@@ -16,6 +16,7 @@
 #endif
 
 #define pgtable_l5_enabled() 0
+#define pgtable_kvmxo_enabled() 0
 
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE - 1))

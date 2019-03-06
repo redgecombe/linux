@@ -43,6 +43,26 @@ static inline bool pgtable_l5_enabled(void)
 extern unsigned int pgdir_shift;
 extern unsigned int ptrs_per_p4d;
 
+#ifdef CONFIG_KVM_XO
+extern unsigned int __pgtable_kvmxo_enabled;
+
+#ifdef USE_EARLY_PGTABLE
+/*
+ * cpu_feature_enabled() is not available in early boot code.
+ * Use variable instead.
+ */
+static inline bool pgtable_kvmxo_enabled(void)
+{
+	return __pgtable_kvmxo_enabled;
+}
+#else
+#define pgtable_kvmxo_enabled() cpu_feature_enabled(X86_FEATURE_KVM_XO)
+#endif /* USE_EARLY_PGTABLE */
+
+#else
+#define pgtable_kvmxo_enabled() 0
+#endif /* CONFIG_KVM_XO */
+
 #endif	/* !__ASSEMBLY__ */
 
 #define SHARED_KERNEL_PMD	0
