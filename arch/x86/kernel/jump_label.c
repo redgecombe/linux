@@ -67,7 +67,13 @@ static void __ref __jump_label_transform(struct jump_entry *entry,
 		code = ideal_nop;
 	}
 
-	if (memcmp((void *)jump_entry_code(entry), expect, JUMP_LABEL_NOP_SIZE))
+
+	/*
+	 * This is a more expensive check when the kernel is not readable, so
+	 * only do it when its easy
+	 */
+	if (!IS_ENABLED(CONFIG_XO_TEXT) && 
+	    memcmp((void *)jump_entry_code(entry), expect, JUMP_LABEL_NOP_SIZE))
 		bug_at((void *)jump_entry_code(entry), line);
 
 	/*
