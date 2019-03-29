@@ -3,7 +3,7 @@
 #define pr_fmt(fmt) "kasan: " fmt
 
 /* cpu_feature_enabled() cannot be used this early */
-#define USE_EARLY_PGTABLE_L5
+#define USE_EARLY_PGTABLE
 
 #include <linux/memblock.h>
 #include <linux/kasan.h>

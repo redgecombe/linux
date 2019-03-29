@@ -23,7 +23,7 @@ typedef struct { pteval_t pte; } pte_t;
 #ifdef CONFIG_X86_5LEVEL
 extern unsigned int __pgtable_l5_enabled;
 
-#ifdef USE_EARLY_PGTABLE_L5
+#ifdef USE_EARLY_PGTABLE
 /*
  * cpu_feature_enabled() is not available in early boot code.
  * Use variable instead.
@@ -34,7 +34,7 @@ static inline bool pgtable_l5_enabled(void)
 }
 #else
 #define pgtable_l5_enabled() cpu_feature_enabled(X86_FEATURE_LA57)
-#endif /* USE_EARLY_PGTABLE_L5 */
+#endif /* USE_EARLY_PGTABLE */
 
 #else
 #define pgtable_l5_enabled() 0

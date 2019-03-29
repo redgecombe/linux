@@ -8,7 +8,7 @@
 #define DISABLE_BRANCH_PROFILING
 
 /* cpu_feature_enabled() cannot be used this early */
-#define USE_EARLY_PGTABLE_L5
+#define USE_EARLY_PGTABLE
 
 #include <linux/init.h>
 #include <linux/linkage.h>
