@@ -731,6 +731,15 @@ static inline int pte_present(pte_t a)
 {
 	return pte_flags(a) & (_PAGE_PRESENT | _PAGE_PROTNONE);
 }
+static inline int pte_nr(pte_t a)
+{
+	return !!(pte_flags(a) & _PAGE_NR);
+}
+
+static inline int pte_writable(pte_t a)
+{
+	return pte_flags(a) & _PAGE_RW;
+}
 
 #ifdef __HAVE_ARCH_PTE_DEVMAP
 static inline int pte_devmap(pte_t a)
@@ -1428,6 +1437,8 @@ static inline bool __pte_access_permitted(unsigned long pteval, bool write)
 {
 	unsigned long need_pte_bits = _PAGE_PRESENT|_PAGE_USER;
 
+
+	//TODO: Need to upadte this, looks like just user space?
 	if (write)
 		need_pte_bits |= _PAGE_RW;
 

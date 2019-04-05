@@ -605,26 +605,37 @@ static void show_ldttss(const struct desc_ptr *gdt, const char *name, u16 index)
 static void
 show_fault_oops(struct pt_regs *regs, unsigned long error_code, unsigned long address)
 {
+	unsigned int level;
+	pgd_t *pgd = NULL;
+	pte_t *pte = NULL;
+
 	if (!oops_may_print())
 		return;
 
-	if (error_code & X86_PF_INSTR) {
-		unsigned int level;
-		pgd_t *pgd;
-		pte_t *pte;
-
+	if ((error_code & X86_PF_INSTR) || pgtable_kvmxo_enabled()) {
 		pgd = __va(read_cr3_pa());
 		pgd += pgd_index(address);
 
 		pte = lookup_address_in_pgd(pgd, address, &level);
+	}
 
-		if (pte && pte_present(*pte) && !pte_exec(*pte))
+	if (!pte || !pte_present(*pte)) {
+		/* Skip the rest of this */
+	} else if (error_code & X86_PF_INSTR) {
+		if (!pte_exec(*pte))
 			pr_crit("kernel tried to execute NX-protected page - exploit attempt? (uid: %d)\n",
 				from_kuid(&init_user_ns, current_uid()));
-		if (pte && pte_present(*pte) && pte_exec(*pte) &&
-				(pgd_flags(*pgd) & _PAGE_USER) &&
+		if (pte_exec(*pte) && (pgd_flags(*pgd) & _PAGE_USER) &&
 				(__read_cr4() & X86_CR4_SMEP))
 			pr_crit("unable to execute userspace code (SMEP?) (uid: %d)\n",
+				from_kuid(&init_user_ns, current_uid()));
+	} else if (pgtable_kvmxo_enabled() && pte_nr(*pte)) {
+		if ((error_code & X86_PF_WRITE)	&& pte_writable(*pte))
+			pr_crit("W^R page not supported with KVM XO (uid: %d)\n",
+				from_kuid(&init_user_ns, current_uid()));
+		else
+			pr_crit("kernel tried to %s XO-protected page - exploit attempt? (uid: %d).\n",
+				error_code & X86_PF_WRITE ? "write" : "read",
 				from_kuid(&init_user_ns, current_uid()));
 	}
 
@@ -718,6 +729,75 @@ static void set_signal_archinfo(unsigned long address,
 	tsk->thread.error_code = error_code | X86_PF_USER;
 	tsk->thread.cr2 = address;
 }
+
+#ifdef CONFIG_XO_TEXT
+extern void show_stack(struct task_struct *task, unsigned long *sp);
+
+static bool exec_only_fault(struct pt_regs *regs, unsigned long error_code,
+			    unsigned long address)
+{
+	unsigned int level;
+	pgd_t *pgd;
+	pte_t *pte;
+	pgprot_t new_prot;
+	unsigned long pfn;
+
+	if (error_code != X86_PF_PROT
+		|| IS_ENABLED(CONFIG_KVM_XO_KERNEL_ENFORCE))
+		return false;
+	
+	pgd = __va(read_cr3_pa());
+	pgd += pgd_index(address);
+
+	pte = lookup_address_in_pgd(pgd, address, &level);
+
+	if (!pte || level == PG_LEVEL_NONE)
+		return false;
+
+	/* If PTE is not NR, can't fix it here */
+	if (!pte_nr(*pte))
+		return false;
+
+	/* KVM XO does not support write and not readable */
+	if (pgtable_kvmxo_enabled() && pte_writable(*pte))
+		return false;
+
+	pr_crit("kernel reading from XO-protected page - exploit attempt? (uid: %d)\n",
+		from_kuid(&init_user_ns, current_uid()));
+
+	if (level == PG_LEVEL_4K) {
+		pte_t new_pte = *pte;
+		
+		/* Flip off NR bit */
+		new_prot = pte_pgprot(new_pte);
+		pfn = pte_pfn(new_pte);
+		pgprot_val(new_prot) &= ~_PAGE_NR;
+		new_pte = pfn_pte(pfn, new_prot);
+
+		set_pte(pte, new_pte);
+	} else if (level == PG_LEVEL_2M) {
+		pmd_t new_pmd = *(pmd_t*)pte;
+
+		new_prot = pmd_pgprot(new_pmd);
+		pfn = pmd_pfn(new_pmd);
+		pgprot_val(new_prot) &= ~_PAGE_NR;
+		new_pmd = pfn_pmd(pfn, new_prot);
+
+		set_pmd((pmd_t*)pte, new_pmd);	
+	}
+	
+	flush_tlb_all();
+
+	show_stack(NULL, (unsigned long *)regs->sp);
+	return true;
+}
+#else /* CONFIG_XO_TEXT */
+static bool exec_only_fault(struct pt_regs *regs, unsigned long error_code,
+			    unsigned long address)
+{
+	return false;
+}
+#endif /* CONFIG_XO_TEXT */
 
 static noinline void
 no_context(struct pt_regs *regs, unsigned long error_code,
@@ -820,6 +900,9 @@ no_context(struct pt_regs *regs, unsigned long error_code,
 	 */
 	if (IS_ENABLED(CONFIG_EFI))
 		efi_recover_from_page_fault(address);
+
+	if (exec_only_fault(regs, error_code, address))
+		return;
 
 oops:
 	/*
@@ -1088,6 +1171,8 @@ static int spurious_kernel_fault_check(unsigned long error_code, pte_t *pte)
 
 	if ((error_code & X86_PF_INSTR) && !pte_exec(*pte))
 		return 0;
+
+	//TODO: Check XO
 
 	return 1;
 }

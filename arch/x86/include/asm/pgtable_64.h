@@ -15,6 +15,7 @@
 #include <linux/bitops.h>
 #include <linux/threads.h>
 #include <asm/fixmap.h>
+#include <asm/cmpxchg.h>
 
 extern p4d_t level4_kernel_pgt[512];
 extern p4d_t level4_ident_pgt[512];
