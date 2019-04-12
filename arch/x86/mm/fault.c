@@ -33,6 +33,11 @@
 #define CREATE_TRACE_POINTS
 #include <asm/trace/exceptions.h>
 
+#ifdef XO_TEXT
+#define NOKPROBE_SYMBOL_EXEC_ONLY(x) NOKPROBE_SYMBOL(x);
+#else
+#define NOKPROBE_SYMBOL_EXEC_ONLY(x)
+#endif
 /*
  * Returns 0 if mmiotrace is disabled, or if the fault is not
  * handled by mmiotrace:
@@ -440,6 +445,7 @@ static int bad_address(void *p)
 
 	return probe_kernel_address((unsigned long *)p, dummy);
 }
+NOKPROBE_SYMBOL_EXEC_ONLY(bad_address);
 
 static void dump_pagetable(unsigned long address)
 {
@@ -493,7 +499,7 @@ out:
 bad:
 	pr_info("BAD\n");
 }
-
+NOKPROBE_SYMBOL_EXEC_ONLY(dump_pagetable);
 #endif /* CONFIG_X86_64 */
 
 /*
@@ -711,6 +717,7 @@ pgtable_bad(struct pt_regs *regs, unsigned long error_code,
 
 	oops_end(flags, regs, sig);
 }
+NOKPROBE_SYMBOL_EXEC_ONLY(pgtable_bad);
 
 static void set_signal_archinfo(unsigned long address,
 				unsigned long error_code)
@@ -925,6 +932,7 @@ oops:
 
 	oops_end(flags, regs, sig);
 }
+NOKPROBE_SYMBOL_EXEC_ONLY(no_context);
 
 /*
  * Print out info about fatal segfaults, if the show_unhandled_signals
@@ -1018,6 +1026,7 @@ bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 {
 	__bad_area_nosemaphore(regs, error_code, address, 0, SEGV_MAPERR);
 }
+NOKPROBE_SYMBOL_EXEC_ONLY(bad_area_nosemaphore);
 
 static void
 __bad_area(struct pt_regs *regs, unsigned long error_code,
@@ -1038,6 +1047,7 @@ bad_area(struct pt_regs *regs, unsigned long error_code, unsigned long address)
 {
 	__bad_area(regs, error_code, address, 0, SEGV_MAPERR);
 }
+NOKPROBE_SYMBOL_EXEC_ONLY(bad_area);
 
 static inline bool bad_area_access_from_pkeys(unsigned long error_code,
 		struct vm_area_struct *vma)
@@ -1093,6 +1103,7 @@ bad_area_access_error(struct pt_regs *regs, unsigned long error_code,
 		__bad_area(regs, error_code, address, 0, SEGV_ACCERR);
 	}
 }
+NOKPROBE_SYMBOL_EXEC_ONLY(bad_area_access_error);
 
 static void
 do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
@@ -1163,6 +1174,7 @@ mm_fault_error(struct pt_regs *regs, unsigned long error_code,
 			BUG();
 	}
 }
+NOKPROBE_SYMBOL_EXEC_ONLY(spurious_kernel_fault_check);
 
 static int spurious_kernel_fault_check(unsigned long error_code, pte_t *pte)
 {
