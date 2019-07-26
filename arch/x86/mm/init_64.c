@@ -1302,6 +1302,20 @@ void set_kernel_text_ro(void)
 	set_memory_ro(start, (end - start) >> PAGE_SHIFT);
 }
 
+void set_kernel_text_nr(void)
+{
+	unsigned long start = PFN_ALIGN(_text);
+	unsigned long end = PFN_ALIGN(_etext);
+
+	pr_debug("Set kernel text: %lx - %lx not readable\n",
+		 start, end);
+
+	/*
+	 * Set the kernel identity mapping for text NR.
+	 */
+	set_memory_nr(start, (end - start) >> PAGE_SHIFT);
+}
+
 void mark_rodata_ro(void)
 {
 	unsigned long start = PFN_ALIGN(_text);

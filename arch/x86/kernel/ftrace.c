@@ -53,6 +53,7 @@ int ftrace_arch_code_modify_post_process(void)
 {
 	set_all_modules_text_ro();
 	set_kernel_text_ro();
+	set_kernel_text_nr();
 	mutex_unlock(&text_mutex);
 	return 0;
 }
