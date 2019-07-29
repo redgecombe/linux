@@ -794,7 +794,8 @@ static void *__text_poke(void *addr, const void *opcode, size_t len)
 	 * If the text does not match what we just wrote then something is
 	 * fundamentally screwy; there's nothing we can really do about that.
 	 */
-	BUG_ON(memcmp(addr, opcode, len));
+	if (!IS_ENABLED(CONFIG_XO_TEXT))
+		BUG_ON(memcmp(addr, opcode, len));
 
 	pte_unmap_unlock(ptep, ptl);
 	local_irq_restore(flags);
