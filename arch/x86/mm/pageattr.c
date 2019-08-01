@@ -427,9 +427,9 @@ static pgprotval_t protect_rodata(unsigned long spfn, unsigned long epfn)
 
 /*
  * Protect kernel text against becoming non executable by forbidding
- * _PAGE_NX.  This protects only the high kernel mapping (_text -> _etext)
- * out of which the kernel actually executes.  Do not protect the low
- * mapping.
+ * _PAGE_NX and _PAGE_NR if the kernel text should be NR.  This protects only
+ * the high kernel mapping (_text -> _etext) out of which the kernel actually
+ * executes.  Do not protect the low mapping.
  *
  * This does not cover __inittext since that is gone after boot.
  */
@@ -439,7 +439,7 @@ static pgprotval_t protect_kernel_text(unsigned long start, unsigned long end)
 	unsigned long t_start = (unsigned long)_text;
 
 	if (overlaps(start, end, t_start, t_end))
-		return _PAGE_NX;
+		return _PAGE_NX | (IS_ENABLED(XO_TEXT) ? _PAGE_NR : 0);
 	return 0;
 }
 
