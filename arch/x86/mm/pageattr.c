@@ -735,6 +735,16 @@ static pgprot_t pgprot_clear_protnone_bits(pgprot_t prot)
 	return prot;
 }
 
+static inline void check_kvm_xo_restriction(unsigned long addr, pgprot_t prot)
+{
+	const unsigned long invalid = _PAGE_RW | _PAGE_NR;
+
+	if (IS_ENABLED(CONFIG_XO_TEXT)
+		&& (pgprot_val(prot) & invalid) == invalid)
+		pr_warn("CPA: vaddr %pK set to unsupported combo - not-readable and writable.\n",
+			(void*) addr);
+}
+
 static int __should_split_large_page(pte_t *kpte, unsigned long address,
 				     struct cpa_data *cpa)
 {
@@ -872,6 +882,7 @@ static int __should_split_large_page(pte_t *kpte, unsigned long address,
 
 	/* All checks passed. Update the large page mapping. */
 	new_pte = pfn_pte(old_pfn, new_prot);
+	check_kvm_xo_restriction(address, new_prot);
 	__set_pmd_pte(kpte, address, new_pte);
 	cpa->flags |= CPA_FLUSHTLB;
 	cpa_inc_lp_preserved(level);
@@ -1516,6 +1527,9 @@ repeat:
 		 */
 		new_pte = pfn_pte(pfn, new_prot);
 		cpa->pfn = pfn;
+		
+		check_kvm_xo_restriction(address, new_prot);
+		
 		/*
 		 * Do we really change anything ?
 		 */
