@@ -34,6 +34,12 @@
 
 #ifdef CONFIG_DYNAMIC_FTRACE
 
+static inline bool has_xo_fault_fixing(void)
+{
+	return IS_ENABLED(CONFIG_XO_TEXT)
+		&& !IS_ENABLED(CONFIG_KVM_XO_KERNEL_ENFORCE);
+}
+
 int ftrace_arch_code_modify_prepare(void)
     __acquires(&text_mutex)
 {
@@ -43,6 +49,10 @@ int ftrace_arch_code_modify_prepare(void)
 	 * ftrace has it set to "read/write".
 	 */
 	mutex_lock(&text_mutex);
+
+	if (has_xo_fault_fixing())
+		return 0;
+	
 	set_kernel_text_rw();
 	set_all_modules_text_rw();
 	return 0;
@@ -51,9 +61,13 @@ int ftrace_arch_code_modify_prepare(void)
 int ftrace_arch_code_modify_post_process(void)
     __releases(&text_mutex)
 {
+	if (has_xo_fault_fixing())
+		goto out;
+
 	set_all_modules_text_ro();
 	set_kernel_text_ro();
 	set_kernel_text_nr();
+out:
 	mutex_unlock(&text_mutex);
 	return 0;
 }
@@ -120,6 +134,23 @@ ftrace_modify_code_direct(unsigned long ip, unsigned const char *old_code,
 		   unsigned const char *new_code)
 {
 	unsigned char replaced[MCOUNT_INSN_SIZE];
+
+	/*
+	 * We can't set text RW while it may be executing when there is
+	 * potential for the XO fault fixer to be fixing a PTE, as it could
+	 * race and one operation would lose its desired permissions change.
+	 * 
+	 * Instead we use text_poke infrastructure in this case. This has the
+	 * positive side affect of not leave the kernel text open to be changed
+	 * from other cores.
+	 * 
+	 * TODO: Have text_poke verify the code before it patches as ftrace does
+	 * in the normal case.
+	 */
+	if (has_xo_fault_fixing()) {
+		text_poke_early((void *)ip, new_code, MCOUNT_INSN_SIZE);
+		return 0;
+	}
 
 	ftrace_expected = old_code;
 
@@ -336,6 +367,11 @@ NOKPROBE_SYMBOL(ftrace_int3_handler);
 
 static int ftrace_write(unsigned long ip, const char *val, int size)
 {
+	if (has_xo_fault_fixing()) {
+		text_poke((void *)ip, val, size);
+		return 0;
+	}
+
 	ip = text_ip_addr(ip);
 
 	if (probe_kernel_write((void *)ip, val, size))
