@@ -16,6 +16,9 @@
 #include "trace_kprobe_selftest.h"
 #include "trace_probe.h"
 #include "trace_probe_tmpl.h"
+#include <linux/module.h>
+#include <linux/set_memory.h>
+
 
 #define KPROBE_EVENT_SYSTEM "kprobes"
 #define KRETPROBE_MAXACTIVE_MAX 4096
@@ -410,6 +413,23 @@ static bool within_notrace_func(struct trace_kprobe *tk)
 #define within_notrace_func(tk)	(false)
 #endif
 
+#ifdef CONFIG_XO_TEXT
+static void disable_nr(void)
+{
+	set_all_modules_text_ro();
+	set_kernel_text_ro();
+}
+
+static void enable_nr(void)
+{
+	set_all_modules_text_nr();
+	set_kernel_text_nr();
+}
+#else
+static void disable_nr(void) { }
+static void enable_nr(void) { }
+#endif
+
 /* Internal register function - just handle k*probes and flags */
 static int __register_trace_kprobe(struct trace_kprobe *tk)
 {
@@ -435,6 +455,8 @@ static int __register_trace_kprobe(struct trace_kprobe *tk)
 		tk->rp.kp.flags &= ~KPROBE_FLAG_DISABLED;
 	else
 		tk->rp.kp.flags |= KPROBE_FLAG_DISABLED;
+		
+	disable_nr();
 
 	if (trace_kprobe_is_return(tk))
 		ret = register_kretprobe(&tk->rp);
@@ -443,6 +465,9 @@ static int __register_trace_kprobe(struct trace_kprobe *tk)
 
 	if (ret == 0)
 		tk->tp.flags |= TP_FLAG_REGISTERED;
+
+	enable_nr();
+
 	return ret;
 }
 

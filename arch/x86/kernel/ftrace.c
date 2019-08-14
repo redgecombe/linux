@@ -50,8 +50,11 @@ int ftrace_arch_code_modify_prepare(void)
 	 */
 	mutex_lock(&text_mutex);
 
-	if (has_xo_fault_fixing())
+	if (has_xo_fault_fixing()) {
+		set_all_modules_text_ro();
+		set_kernel_text_ro();
 		return 0;
+	}
 	
 	set_kernel_text_rw();
 	set_all_modules_text_rw();
@@ -66,8 +69,9 @@ int ftrace_arch_code_modify_post_process(void)
 
 	set_all_modules_text_ro();
 	set_kernel_text_ro();
-	set_kernel_text_nr();
 out:
+	set_all_modules_text_nr();
+	set_kernel_text_nr();
 	mutex_unlock(&text_mutex);
 	return 0;
 }
