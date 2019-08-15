@@ -297,9 +297,11 @@ config NEED_PER_CPU_PAGE_FIRST_CHUNK
 
 config ARCH_HIBERNATION_POSSIBLE
 	def_bool y
+	depends on !XO_TEXT
 
 config ARCH_SUSPEND_POSSIBLE
 	def_bool y
+	depends on !XO_TEXT
 
 config ARCH_WANT_HUGE_PMD_SHARE
 	def_bool y
@@ -797,7 +799,7 @@ config KVM_GUEST
 
 config XO_TEXT
 	bool "Set kernel text as execute only"
-	depends on KVM_XO && !HIBERNATION
+	depends on KVM_XO
 
 config ARCH_HAS_NR
 	bool "Architecture supports not readable memory"
