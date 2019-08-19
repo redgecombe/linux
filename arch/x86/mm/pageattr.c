@@ -1786,6 +1786,19 @@ static inline int cpa_clear_pages_array(struct page **pages, int numpages,
 		CPA_PAGES_ARRAY, pages);
 }
 
+int break_page_range(unsigned long start, unsigned long end)
+{
+	unsigned long addr;
+	int ret = 0;
+
+	for (addr = PAGE_ALIGN(start); addr < end; addr+=PAGE_SIZE) {
+		ret |= change_page_attr_set_clr(&addr, 1, __pgprot(0),
+						__pgprot(0), 1, 0, NULL);
+	}
+
+	return ret;
+}
+
 int _set_memory_uc(unsigned long addr, int numpages)
 {
 	/*

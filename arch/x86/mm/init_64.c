@@ -1369,6 +1369,15 @@ void mark_xdata_xo(void)
 	printk(KERN_INFO "Read protecting the kernel executable data: %luk\n",
 	       (end - start) >> 10);
 
+	/* 
+	 * If using the XO fault fixer, it may race splitting pages on the
+	 * direct map, so ensure pages are broken ahead of time so this won't
+	 * happen.
+	 */
+	if (!IS_ENABLED(CONFIG_KVM_XO_KERNEL_ENFORCE))
+		break_page_range((unsigned long)__va(start),
+				 (unsigned long)__va(end));
+
 	set_memory_nr(start, size >> PAGE_SHIFT);
 }
 

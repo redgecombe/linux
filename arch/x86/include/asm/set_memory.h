@@ -93,6 +93,8 @@ void set_kernel_text_rw(void);
 void set_kernel_text_ro(void);
 void set_kernel_text_nr(void);
 
+int break_page_range(unsigned long start, unsigned long end);
+
 #ifdef CONFIG_X86_64
 static inline int set_mce_nospec(unsigned long pfn)
 {
