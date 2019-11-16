@@ -757,7 +757,7 @@ int load_pdptrs(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu, unsigned long cr3)
 
 	ret = kvm_read_guest_page_mmu(vcpu, mmu, pdpt_gfn, pdpte,
 				      offset * sizeof(u64), sizeof(pdpte),
-				      PFERR_USER_MASK|PFERR_WRITE_MASK);
+				      PFERR_READ_MASK|PFERR_WRITE_MASK);
 	if (ret < 0) {
 		ret = 0;
 		goto out;
@@ -796,7 +796,7 @@ bool pdptrs_changed(struct kvm_vcpu *vcpu)
 	gfn = (kvm_read_cr3(vcpu) & 0xffffffe0ul) >> PAGE_SHIFT;
 	offset = (kvm_read_cr3(vcpu) & 0xffffffe0ul) & (PAGE_SIZE - 1);
 	r = kvm_read_nested_guest_page(vcpu, gfn, pdpte, offset, sizeof(pdpte),
-				       PFERR_USER_MASK | PFERR_WRITE_MASK);
+				       PFERR_READ_MASK | PFERR_WRITE_MASK);
 	if (r < 0)
 		return true;
 
@@ -5853,8 +5853,6 @@ gpa_t translate_nested_gpa(struct kvm_vcpu *vcpu, gpa_t gpa, u32 access,
 
 	BUG_ON(!mmu_is_nested(vcpu));
 
-	/* NPT walks are always user-walks */
-	access |= PFERR_USER_MASK;
 	t_gpa  = vcpu->arch.mmu->gva_to_gpa(vcpu, gpa, access, exception);
 
 	return t_gpa;
@@ -5864,6 +5862,7 @@ gpa_t kvm_mmu_gva_to_gpa_read(struct kvm_vcpu *vcpu, gva_t gva,
 			      struct x86_exception *exception)
 {
 	u32 access = (kvm_x86_ops.get_cpl(vcpu) == 3) ? PFERR_USER_MASK : 0;
+	access |= PFERR_READ_MASK;
 	return vcpu->arch.walk_mmu->gva_to_gpa(vcpu, gva, access, exception);
 }
 
@@ -6086,7 +6085,7 @@ static int vcpu_mmio_gva_to_gpa(struct kvm_vcpu *vcpu, unsigned long gva,
 				bool write)
 {
 	u32 access = ((kvm_x86_ops.get_cpl(vcpu) == 3) ? PFERR_USER_MASK : 0)
-		| (write ? PFERR_WRITE_MASK : 0);
+		| (write ? PFERR_WRITE_MASK : PFERR_READ_MASK);
 
 	/*
 	 * currently PKRU is only applied to ept enabled guest so
@@ -7897,7 +7896,7 @@ int kvm_arch_init(void *opaque)
 
 	kvm_mmu_set_mask_ptes(PT_USER_MASK, PT_ACCESSED_MASK,
 			PT_DIRTY_MASK, PT64_NX_MASK, 0,
-			PT_PRESENT_MASK, 0, sme_me_mask);
+			PT_PRESENT_MASK, 0, sme_me_mask, 0);
 	kvm_timer_init();
 
 	perf_register_guest_info_callbacks(&kvm_guest_cbs);

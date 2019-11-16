@@ -2602,7 +2602,6 @@ static int set_spte(struct kvm_vcpu *vcpu, u64 *sptep,
 		return 0;
 
 	sp = sptep_to_sp(sptep);
-
 	ret = make_spte(vcpu, pte_access, level, gfn, pfn, *sptep, speculative,
 			can_unsync, host_writable, sp_ad_disabled(sp), &spte);
 
@@ -4229,51 +4228,67 @@ reset_ept_shadow_zero_bits_mask(struct kvm_vcpu *vcpu,
 				    shadow_phys_bits, execonly);
 }
 
-#define BYTE_MASK(access) \
+#define PERM_MASK(access) \
 	((1 & (access) ? 2 : 0) | \
 	 (2 & (access) ? 4 : 0) | \
 	 (3 & (access) ? 8 : 0) | \
 	 (4 & (access) ? 16 : 0) | \
 	 (5 & (access) ? 32 : 0) | \
 	 (6 & (access) ? 64 : 0) | \
-	 (7 & (access) ? 128 : 0))
+	 (7 & (access) ? 128 : 0) | \
+	 (8 & (access) ? 256 : 0) | \
+	 (9 & (access) ? 512 : 0) | \
+	 (10 & (access) ? 1024 : 0) | \
+	 (11 & (access) ? 2048 : 0) | \
+	 (12 & (access) ? 4096 : 0) | \
+	 (13 & (access) ? 8192 : 0) | \
+	 (14 & (access) ? 16384 : 0) | \
+	 (15 & (access) ? 32768 : 0))
 
 
 static void update_permission_bitmask(struct kvm_vcpu *vcpu,
 				      struct kvm_mmu *mmu, bool ept)
 {
-	unsigned byte;
+	unsigned index;
 
-	const u8 x = BYTE_MASK(ACC_EXEC_MASK);
-	const u8 w = BYTE_MASK(ACC_WRITE_MASK);
-	const u8 u = BYTE_MASK(ACC_USER_MASK);
+	const u16 x = PERM_MASK(ACC_EXEC_MASK);
+	const u16 w = PERM_MASK(ACC_WRITE_MASK);
+	const u16 u = PERM_MASK(ACC_USER_MASK);
+	const u16 r = PERM_MASK(ACC_READ_MASK);
 
 	bool cr4_smep = kvm_read_cr4_bits(vcpu, X86_CR4_SMEP) != 0;
 	bool cr4_smap = kvm_read_cr4_bits(vcpu, X86_CR4_SMAP) != 0;
 	bool cr0_wp = is_write_protection(vcpu);
 
-	for (byte = 0; byte < ARRAY_SIZE(mmu->permissions); ++byte) {
-		unsigned pfec = byte << 1;
-
+	for (index = 0; index < ARRAY_SIZE(mmu->permissions); ++index) {
 		/*
-		 * Each "*f" variable has a 1 bit for each UWX value
+		 * Each "*f" variable has a 1 bit for each RUWX value
 		 * that causes a fault with the given PFEC.
 		 */
 
 		/* Faults from writes to non-writable pages */
-		u8 wf = (pfec & PFERR_WRITE_MASK) ? (u8)~w : 0;
+		u16 wf = (index & PERM_WRITE_MASK) ? (u16)~w : 0;
+		/*
+		 * Faults from fetches of non-executable pages. Use bit 2 as
+		 * index into mmu->permissions[].
+		 */
+		u16 ff = (index & PERM_FETCH_MASK) ? (u16)~x : 0;
 		/* Faults from user mode accesses to supervisor pages */
-		u8 uf = (pfec & PFERR_USER_MASK) ? (u8)~u : 0;
-		/* Faults from fetches of non-executable pages*/
-		u8 ff = (pfec & PFERR_FETCH_MASK) ? (u8)~x : 0;
+		u16 uf = 0;
+		/* Faults from acceses to not readable pages */
+		u16 rf = 0;
 		/* Faults from kernel mode fetches of user pages */
-		u8 smepf = 0;
+		u16 smepf = 0;
 		/* Faults from kernel mode accesses of user pages */
-		u8 smapf = 0;
+		u16 smapf = 0;
 
-		if (!ept) {
+		if (ept) {
+			rf = (index & PERM_READ_MASK) ? (u16)~r : 0;
+		} else {
 			/* Faults from kernel mode accesses to user pages */
-			u8 kf = (pfec & PFERR_USER_MASK) ? 0 : u;
+			u16 kf = (index & PERM_USER_MASK) ? 0 : u;
+
+			uf = (index & PERM_USER_MASK) ? (u16)~u : 0;
 
 			/* Not really needed: !nx will cause pte.nx to fault */
 			if (!mmu->nx)
@@ -4281,11 +4296,11 @@ static void update_permission_bitmask(struct kvm_vcpu *vcpu,
 
 			/* Allow supervisor writes if !cr0.wp */
 			if (!cr0_wp)
-				wf = (pfec & PFERR_USER_MASK) ? wf : 0;
+				wf = (index & PERM_WRITE_MASK) ? wf : 0;
 
 			/* Disallow supervisor fetches of user code if cr4.smep */
 			if (cr4_smep)
-				smepf = (pfec & PFERR_FETCH_MASK) ? kf : 0;
+				smepf = (index & PERM_FETCH_MASK) ? kf : 0;
 
 			/*
 			 * SMAP:kernel-mode data accesses from user-mode
@@ -4304,10 +4319,10 @@ static void update_permission_bitmask(struct kvm_vcpu *vcpu,
 			 * *not* subject to SMAP restrictions.
 			 */
 			if (cr4_smap)
-				smapf = (pfec & (PFERR_RSVD_MASK|PFERR_FETCH_MASK)) ? 0 : kf;
+				smapf = (index & (PERM_SMAP_MASK|PERM_FETCH_MASK)) ? 0 : kf;
 		}
 
-		mmu->permissions[byte] = ff | uf | wf | smepf | smapf;
+		mmu->permissions[index] = ff | uf | wf | smepf | smapf | rf;
 	}
 }
 

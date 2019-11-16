@@ -211,8 +211,7 @@ no_present:
 /*
  * For PTTYPE_EPT, a page table can be executable but not readable
  * on supported processors. Therefore, set_spte does not automatically
- * set bit 0 if execute only is supported. Here, we repurpose ACC_USER_MASK
- * to signify readability since it isn't used in the EPT case
+ * set bit 0 if execute only is supported.
  */
 static inline unsigned FNAME(gpte_access)(u64 gpte)
 {
@@ -220,7 +219,7 @@ static inline unsigned FNAME(gpte_access)(u64 gpte)
 #if PTTYPE == PTTYPE_EPT
 	access = ((gpte & VMX_EPT_WRITABLE_MASK) ? ACC_WRITE_MASK : 0) |
 		((gpte & VMX_EPT_EXECUTABLE_MASK) ? ACC_EXEC_MASK : 0) |
-		((gpte & VMX_EPT_READABLE_MASK) ? ACC_USER_MASK : 0);
+		((gpte & VMX_EPT_READABLE_MASK) ? ACC_READ_MASK : 0);
 #else
 	BUILD_BUG_ON(ACC_EXEC_MASK != PT_PRESENT_MASK);
 	BUILD_BUG_ON(ACC_EXEC_MASK != 1);
@@ -326,6 +325,9 @@ static int FNAME(walk_addr_generic)(struct guest_walker *walker,
 	const int write_fault = access & PFERR_WRITE_MASK;
 	const int user_fault  = access & PFERR_USER_MASK;
 	const int fetch_fault = access & PFERR_FETCH_MASK;
+#if PTTYPE == PTTYPE_EPT
+	const int read_fault  = access & PFERR_READ_MASK;
+#endif
 	u16 errcode = 0;
 	gpa_t real_gpa;
 	gfn_t gfn;
@@ -354,7 +356,7 @@ retry_walk:
 	 * by the MOV to CR instruction are treated as reads and do not cause the
 	 * processor to set the dirty flag in any EPT paging-structure entry.
 	 */
-	nested_access = (have_ad ? PFERR_WRITE_MASK : 0) | PFERR_USER_MASK;
+	nested_access = (have_ad ? PFERR_WRITE_MASK : 0) | PFERR_READ_MASK;
 
 	pte_access = ~0;
 	++walker->level;
@@ -494,7 +496,7 @@ error:
 		vcpu->arch.exit_qualification &= 0x180;
 		if (write_fault)
 			vcpu->arch.exit_qualification |= EPT_VIOLATION_ACC_WRITE;
-		if (user_fault)
+		if (read_fault)
 			vcpu->arch.exit_qualification |= EPT_VIOLATION_ACC_READ;
 		if (fetch_fault)
 			vcpu->arch.exit_qualification |= EPT_VIOLATION_ACC_INSTR;

@@ -155,6 +155,17 @@ static inline bool is_write_protection(struct kvm_vcpu *vcpu)
 	return kvm_read_cr0_bits(vcpu, X86_CR0_WP);
 }
 
+#define PERM_WRITE_BIT	0
+#define PERM_USER_BIT	1
+#define PERM_SMAP_BIT	2
+#define PERM_FETCH_BIT	3
+#define PERM_READ_BIT	4
+
+#define PERM_WRITE_MASK (1U << PERM_WRITE_BIT)
+#define PERM_USER_MASK	(1U << PERM_USER_BIT)
+#define PERM_SMAP_MASK	(1U << PERM_SMAP_BIT)
+#define PERM_FETCH_MASK	(1U << PERM_FETCH_BIT)
+#define PERM_READ_MASK	(1U << PERM_READ_BIT)
 /*
  * Check if a given access (described through the I/D, W/R and U/S bits of a
  * page fault error code pfec) causes a permission fault with the given PTE
@@ -182,12 +193,27 @@ static inline u8 permission_fault(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu,
 	 * the PFERR_RSVD_MASK bit; this bit will always be zero in pfec,
 	 * but it will be one in index if SMAP checks are being overridden.
 	 * It is important to keep this branchless.
+	 *
+	 * Relocate the bits from the pferr code such that they form a 4 bit value
+	 * to keep the array size down. Bit positions are defined in PERM_X_BIT
+	 * defines.
 	 */
-	unsigned long smap = (cpl - 3) & (rflags & X86_EFLAGS_AC);
-	int index = (pfec >> 1) +
-		    (smap >> (X86_EFLAGS_AC_BIT - PFERR_RSVD_BIT + 1));
-	bool fault = (mmu->permissions[index] >> pte_access) & 1;
+	bool smap = !!((cpl - 3) & (rflags & X86_EFLAGS_AC));
 	u32 errcode = PFERR_PRESENT_MASK;
+	bool fault;
+	int index;
+
+	/* Set write at bit 0, user at bit 1, fetch at bit 3 */
+	BUILD_BUG_ON(PFERR_WRITE_BIT - PERM_WRITE_BIT != 1);
+	BUILD_BUG_ON(PFERR_USER_BIT - PERM_USER_BIT != 1);
+	BUILD_BUG_ON(PFERR_FETCH_BIT - PERM_FETCH_BIT != 1);
+	index = (pfec & (PFERR_WRITE_MASK|PFERR_USER_MASK|PFERR_FETCH_MASK)) >> 1;
+	/* Set smap at bit 2 */
+	index |= (unsigned)smap >> PERM_SMAP_BIT;
+	/* Set read at bit 4 */
+	index |= (pfec & PFERR_READ_MASK) >> (PFERR_READ_BIT - PERM_READ_BIT);
+
+	fault = (mmu->permissions[index] >> pte_access) & 1;
 
 	WARN_ON(pfec & (PFERR_PK_MASK | PFERR_RSVD_MASK));
 	if (unlikely(mmu->pkru_mask)) {

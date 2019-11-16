@@ -5355,9 +5355,9 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 	trace_kvm_page_fault(gpa, exit_qualification);
 
-	/* Is it a read fault? */
 	error_code = (exit_qualification & EPT_VIOLATION_ACC_READ)
-		     ? PFERR_USER_MASK : 0;
+		      ? PFERR_READ_MASK : 0;
+
 	/* Is it a write fault? */
 	error_code |= (exit_qualification & EPT_VIOLATION_ACC_WRITE)
 		      ? PFERR_WRITE_MASK : 0;
@@ -5507,12 +5507,12 @@ static void shrink_ple_window(struct kvm_vcpu *vcpu)
 
 static void vmx_enable_tdp(void)
 {
-	kvm_mmu_set_mask_ptes(VMX_EPT_READABLE_MASK,
+	kvm_mmu_set_mask_ptes(0ull,
 		enable_ept_ad_bits ? VMX_EPT_ACCESS_BIT : 0ull,
 		enable_ept_ad_bits ? VMX_EPT_DIRTY_BIT : 0ull,
 		0ull, VMX_EPT_EXECUTABLE_MASK,
 		cpu_has_vmx_ept_execute_only() ? 0ull : VMX_EPT_READABLE_MASK,
-		VMX_EPT_RWX_MASK, 0ull);
+		VMX_EPT_READABLE_MASK, VMX_EPT_RWX_MASK, 0ull);
 
 	ept_set_mmio_spte_mask();
 }

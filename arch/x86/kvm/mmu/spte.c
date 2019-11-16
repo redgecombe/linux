@@ -26,6 +26,7 @@ u64 __read_mostly shadow_mmio_value;
 u64 __read_mostly shadow_mmio_access_mask;
 u64 __read_mostly shadow_present_mask;
 u64 __read_mostly shadow_me_mask;
+u64 __read_mostly shadow_r_mask;
 u64 __read_mostly shadow_acc_track_mask;
 
 u64 __read_mostly shadow_nonpresent_or_rsvd_mask;
@@ -117,6 +118,9 @@ int make_spte(struct kvm_vcpu *vcpu, unsigned int pte_access, int level,
 	if (pte_access & ACC_USER_MASK)
 		spte |= shadow_user_mask;
 
+	if (pte_access & ACC_READ_MASK)
+		spte |= shadow_r_mask;
+
 	if (level > PG_LEVEL_4K)
 		spte |= PT_PAGE_SIZE_MASK;
 	if (tdp_enabled)
@@ -170,7 +174,8 @@ u64 make_nonleaf_spte(u64 *child_pt, bool ad_disabled)
 	u64 spte;
 
 	spte = __pa(child_pt) | shadow_present_mask | PT_WRITABLE_MASK |
-	       shadow_user_mask | shadow_x_mask | shadow_me_mask;
+	       shadow_user_mask | shadow_x_mask | shadow_me_mask |
+	       shadow_r_mask;
 
 	if (ad_disabled)
 		spte |= SPTE_AD_DISABLED_MASK;
@@ -260,7 +265,7 @@ EXPORT_SYMBOL_GPL(kvm_mmu_set_mmio_spte_mask);
  *  - At least one of @accessed_mask or @acc_track_mask must be set
  */
 void kvm_mmu_set_mask_ptes(u64 user_mask, u64 accessed_mask,
-		u64 dirty_mask, u64 nx_mask, u64 x_mask, u64 p_mask,
+		u64 dirty_mask, u64 nx_mask, u64 x_mask, u64 p_mask, u64 r_mask,
 		u64 acc_track_mask, u64 me_mask)
 {
 	BUG_ON(!dirty_mask != !accessed_mask);
@@ -275,6 +280,7 @@ void kvm_mmu_set_mask_ptes(u64 user_mask, u64 accessed_mask,
 	shadow_present_mask = p_mask;
 	shadow_acc_track_mask = acc_track_mask;
 	shadow_me_mask = me_mask;
+	shadow_r_mask = r_mask;
 }
 EXPORT_SYMBOL_GPL(kvm_mmu_set_mask_ptes);
 
