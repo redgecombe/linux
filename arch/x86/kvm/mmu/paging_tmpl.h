@@ -213,7 +213,7 @@ no_present:
  * on supported processors. Therefore, set_spte does not automatically
  * set bit 0 if execute only is supported.
  */
-static inline unsigned FNAME(gpte_access)(u64 gpte)
+static inline unsigned FNAME(gpte_access)(struct kvm_vcpu *vcpu, u64 gpte)
 {
 	unsigned access;
 #if PTTYPE == PTTYPE_EPT
@@ -224,6 +224,7 @@ static inline unsigned FNAME(gpte_access)(u64 gpte)
 	BUILD_BUG_ON(ACC_EXEC_MASK != PT_PRESENT_MASK);
 	BUILD_BUG_ON(ACC_EXEC_MASK != 1);
 	access = gpte & (PT_WRITABLE_MASK | PT_USER_MASK | PT_PRESENT_MASK);
+	access |= ((gpte & xo_gpa_mask(vcpu->kvm)) && is_xo_enforced(vcpu)) ? 0 : ACC_READ_MASK;
 	/* Combine NX with P (which is set here) to get ACC_EXEC_MASK.  */
 	access ^= (gpte >> PT64_NX_SHIFT);
 #endif
@@ -321,7 +322,7 @@ static int FNAME(walk_addr_generic)(struct guest_walker *walker,
 	gpa_t pte_gpa;
 	bool have_ad;
 	int offset;
-	u64 walk_nx_mask = 0;
+	u64 invert_mask = 0;
 	const int write_fault = access & PFERR_WRITE_MASK;
 	const int user_fault  = access & PFERR_USER_MASK;
 	const int fetch_fault = access & PFERR_FETCH_MASK;
@@ -339,7 +340,9 @@ retry_walk:
 	have_ad       = PT_HAVE_ACCESSED_DIRTY(mmu);
 
 #if PTTYPE == 64
-	walk_nx_mask = 1ULL << PT64_NX_SHIFT;
+	invert_mask = 1ULL << PT64_NX_SHIFT;
+	if (is_xo_paging(vcpu))
+		invert_mask |= xo_gpa_mask(vcpu->kvm);
 	if (walker->level == PT32E_ROOT_LEVEL) {
 		pte = mmu->get_pdptr(vcpu, (addr >> 30) & 3);
 		trace_kvm_mmu_paging_element(pte, walker->level);
@@ -409,7 +412,7 @@ retry_walk:
 		 * Inverting the NX it lets us AND it like other
 		 * permission bits.
 		 */
-		pte_access = pt_access & (pte ^ walk_nx_mask);
+		pte_access = pt_access & (pte ^ invert_mask);
 
 		if (unlikely(!FNAME(is_present_gpte)(pte)))
 			goto error;
@@ -426,8 +429,8 @@ retry_walk:
 	accessed_dirty = have_ad ? pte_access & PT_GUEST_ACCESSED_MASK : 0;
 
 	/* Convert to ACC_*_MASK flags for struct guest_walker.  */
-	walker->pt_access = FNAME(gpte_access)(pt_access ^ walk_nx_mask);
-	walker->pte_access = FNAME(gpte_access)(pte_access ^ walk_nx_mask);
+	walker->pt_access = FNAME(gpte_access)(vcpu, pt_access ^ invert_mask);
+	walker->pte_access = FNAME(gpte_access)(vcpu, pte_access ^ invert_mask);
 	errcode = permission_fault(vcpu, mmu, walker->pte_access, pte_pkey, access);
 	if (unlikely(errcode))
 		goto error;
@@ -543,7 +546,7 @@ FNAME(prefetch_gpte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 	pgprintk("%s: gpte %llx spte %p\n", __func__, (u64)gpte, spte);
 
 	gfn = gpte_to_gfn(vcpu, gpte);
-	pte_access = sp->role.access & FNAME(gpte_access)(gpte);
+	pte_access = sp->role.access & FNAME(gpte_access)(vcpu, gpte);
 	FNAME(protect_clean_gpte)(vcpu->arch.mmu, &pte_access, gpte);
 	pfn = pte_prefetch_gfn_to_pfn(vcpu, gfn,
 			no_dirty_log && (pte_access & ACC_WRITE_MASK));
@@ -1062,7 +1065,7 @@ static int FNAME(sync_page)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp)
 
 		gfn = gpte_to_gfn(vcpu, gpte);
 		pte_access = sp->role.access;
-		pte_access &= FNAME(gpte_access)(gpte);
+		pte_access &= FNAME(gpte_access)(vcpu, gpte);
 		FNAME(protect_clean_gpte)(vcpu->arch.mmu, &pte_access, gpte);
 
 		if (sync_mmio_spte(vcpu, &sp->spt[i], gfn, pte_access,

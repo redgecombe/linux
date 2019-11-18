@@ -5303,12 +5303,14 @@ static int handle_task_switch(struct kvm_vcpu *vcpu)
 
 static bool handle_stolen_access(struct kvm_vcpu *vcpu, gpa_t gpa, u64 error_code)
 {
+	bool xo_fault = is_xo_enforced(vcpu) && (error_code & PFERR_XO_ALIAS_MASK) &&
+			!(error_code & PFERR_FETCH_MASK);
 	bool pte_rsvd = (error_code & PFERR_GUEST_PAGE_MASK) &&
 			(gpa & rsvd_for_page_tables(vcpu->kvm));
 	int cpl = kvm_x86_ops.get_cpl(vcpu);
 	struct x86_exception fault;
 
-	if (!pte_rsvd)
+	if (!pte_rsvd && !xo_fault)
 		return false;
 
 	/*
@@ -5320,7 +5322,10 @@ static bool handle_stolen_access(struct kvm_vcpu *vcpu, gpa_t gpa, u64 error_cod
 		return true;
 	}
 
-	fault.error_code = PFERR_RSVD_MASK;
+	if (pte_rsvd)
+		fault.error_code = PFERR_RSVD_MASK;
+	else
+		fault.error_code = PFERR_PRESENT_MASK | (error_code & PFERR_WRITE_MASK);
 	fault.error_code |= ((cpl == 3) ? PFERR_USER_MASK : 0);
 
 	fault.vector = PF_VECTOR;
