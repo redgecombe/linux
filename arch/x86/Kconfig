@@ -821,6 +821,18 @@ config ARCH_CPUIDLE_HALTPOLL
 	help
 	  If virtualized under KVM, disable host haltpoll.
 
+config PARAVIRT_EXEC_ONLY
+	bool "Support for VMM based execute only virtual memory permissions"
+	select DYNAMIC_PHYSICAL_MASK
+	select SPARSEMEM_VMEMMAP
+	depends on KVM_GUEST && X86_64
+	default y
+	help
+	  This option enables support for execute-only memory for
+	  paravirtualized guests. If support from the underlying VMM is not
+	  detected at boot, this capability will be automatically disabled.
+	  Currently it is only supported on KVM.
+
 config PVH
 	bool "Support for running PVH guests"
 	help
