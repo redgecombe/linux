@@ -2062,6 +2062,7 @@ static struct kvm_mmu_page *__kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 	if (role.direct)
 		role.gpte_is_8_bytes = true;
 	role.access = access;
+	role.kvm_xo = is_xo_enforced(vcpu);
 	if (!direct_mmu && vcpu->arch.mmu->root_level <= PT32_ROOT_LEVEL) {
 		quadrant = gaddr >> (PAGE_SHIFT + (PT64_PT_BITS * level));
 		quadrant &= (1 << ((PT32_PT_BITS - PT64_PT_BITS) * level)) - 1;
@@ -2702,13 +2703,21 @@ static kvm_pfn_t pte_prefetch_gfn_to_pfn(struct kvm_vcpu *vcpu, gfn_t gfn,
 	return gfn_to_pfn_memslot_atomic(slot, gfn);
 }
 
+unsigned int mmu_get_alias_permissions(struct kvm_vcpu *vcpu, gfn_t stolen_bits)
+{
+	if (stolen_bits & gpa_to_gfn(xo_gpa_mask(vcpu->kvm)) && is_xo_enforced(vcpu))
+		return ACC_EXEC_MASK;
+	return ACC_ALL;
+}
+
 static int direct_pte_prefetch_many(struct kvm_vcpu *vcpu,
 				    struct kvm_mmu_page *sp,
 				    u64 *start, u64 *end)
 {
 	struct page *pages[PTE_PREFETCH_NUM];
 	struct kvm_memory_slot *slot;
-	unsigned int access = sp->role.access;
+	unsigned int access = sp->role.access &
+			      mmu_get_alias_permissions(vcpu, sp->gfn_stolen_bits);
 	int i, ret;
 	gfn_t gfn;
 
@@ -2895,6 +2904,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t gpa, u32 error_code,
 	gfn_t gfn_stolen_bits = gpa_to_gfn(gpa_stolen_bits);
 	gfn_t gfn = gpa_to_gfn(gpa);
 	gfn_t base_gfn = gfn;
+	unsigned int pte_access = mmu_get_alias_permissions(vcpu, gfn_stolen_bits);
 
 	if (WARN_ON(!VALID_PAGE(vcpu->arch.mmu->root_hpa)))
 		return RET_PF_RETRY;
@@ -2928,7 +2938,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t gpa, u32 error_code,
 		}
 	}
 
-	ret = mmu_set_spte(vcpu, it.sptep, ACC_ALL, write,
+	ret = mmu_set_spte(vcpu, it.sptep, pte_access, write,
 			   level, base_gfn, pfn, prefault, map_writable);
 	if (ret == RET_PF_SPURIOUS)
 		return ret;
@@ -4276,15 +4286,13 @@ static void update_permission_bitmask(struct kvm_vcpu *vcpu,
 		/* Faults from user mode accesses to supervisor pages */
 		u16 uf = 0;
 		/* Faults from acceses to not readable pages */
-		u16 rf = 0;
+		u16 rf = (index & PERM_READ_MASK) ? (u16)~r : 0;
 		/* Faults from kernel mode fetches of user pages */
 		u16 smepf = 0;
 		/* Faults from kernel mode accesses of user pages */
 		u16 smapf = 0;
 
-		if (ept) {
-			rf = (index & PERM_READ_MASK) ? (u16)~r : 0;
-		} else {
+		if (!ept) {
 			/* Faults from kernel mode accesses to user pages */
 			u16 kf = (index & PERM_USER_MASK) ? 0 : u;
 
@@ -4494,6 +4502,7 @@ static union kvm_mmu_role kvm_calc_mmu_role_common(struct kvm_vcpu *vcpu,
 	role.base.cr0_wp = is_write_protection(vcpu);
 	role.base.smm = is_smm(vcpu);
 	role.base.guest_mode = is_guest_mode(vcpu);
+	role.base.kvm_xo = is_xo_enforced(vcpu);
 
 	if (base_only)
 		return role;

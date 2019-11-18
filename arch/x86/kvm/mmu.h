@@ -246,6 +246,8 @@ int kvm_arch_write_log_dirty(struct kvm_vcpu *vcpu);
 int kvm_mmu_post_init_vm(struct kvm *kvm);
 void kvm_mmu_pre_destroy_vm(struct kvm *kvm);
 
+unsigned int mmu_get_alias_permissions(struct kvm_vcpu *vcpu, gfn_t stolen_bits);
+
 static inline void warn_on_and_strip_synthetic(u64 *error_code)
 {
 	/*
@@ -259,25 +261,44 @@ static inline void warn_on_and_strip_synthetic(u64 *error_code)
 
 static inline gpa_t gpa_stolen_mask(struct kvm *kvm)
 {
-	/* Currently there are no stolen bits in KVM */
-	return 0;
+	return kvm->arch.gpa_stolen_mask;
+}
+
+static inline gpa_t xo_gpa_mask(struct kvm *kvm)
+{
+	return kvm->arch.gpa_xo_mask & gpa_stolen_mask(kvm);
 }
 
 static inline gpa_t pf_error_to_stolen(struct kvm *kvm, u32 error_code)
 {
+	if (error_code & PFERR_XO_ALIAS_MASK)
+		return xo_gpa_mask(kvm);
+
 	return 0;
 }
 
 static inline u32 stolen_to_pf_error(struct kvm *kvm, gpa_t gpa)
 {
+	if (xo_gpa_mask(kvm) & gpa)
+		return PFERR_XO_ALIAS_MASK;
+
 	return 0;
 }
 
 /* Software reserved bits for non-leaf PTEs */
 static inline gpa_t rsvd_for_page_tables(struct kvm *kvm)
 {
-	/* There are currently no features with rsvd bits in non-leaf ptes */
-	return 0;
+	return xo_gpa_mask(kvm);
+}
+
+static inline bool is_xo_paging(struct kvm_vcpu *vcpu)
+{
+	return xo_gpa_mask(vcpu->kvm);
+}
+
+static inline bool is_xo_enforced(struct kvm_vcpu *vcpu)
+{
+	return is_xo_paging(vcpu) && !vcpu->arch.pv_xo_enforce_disable;
 }
 
 #endif

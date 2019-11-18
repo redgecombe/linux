@@ -471,17 +471,18 @@ void kvm_tdp_mmu_zap_all(struct kvm *kvm)
 static int tdp_mmu_map_handle_target_level(struct kvm_vcpu *vcpu, int write,
 					  int map_writable,
 					  struct tdp_iter *iter,
-					  kvm_pfn_t pfn, bool prefault)
+					  kvm_pfn_t pfn, bool prefault,
+					  unsigned int access)
 {
 	u64 new_spte;
 	int ret = 0;
 	int make_spte_ret = 0;
 
 	if (unlikely(is_noslot_pfn(pfn))) {
-		new_spte = make_mmio_spte(vcpu, iter->gfn, ACC_ALL);
+		new_spte = make_mmio_spte(vcpu, iter->gfn, access);
 		trace_mark_mmio_spte(iter->sptep, iter->gfn, new_spte);
 	} else
-		make_spte_ret = make_spte(vcpu, ACC_ALL, iter->level, iter->gfn,
+		make_spte_ret = make_spte(vcpu, access, iter->level, iter->gfn,
 					 pfn, iter->old_spte, prefault, true,
 					 map_writable, !shadow_accessed_mask,
 					 &new_spte);
@@ -522,6 +523,7 @@ int kvm_tdp_mmu_map(struct kvm_vcpu *vcpu, gpa_t gpa, u32 error_code,
 		    bool prefault)
 {
 	gfn_t gfn_stolen_bits = gpa_to_gfn(pf_error_to_stolen(vcpu->kvm, error_code));
+	unsigned int pte_access = mmu_get_alias_permissions(vcpu, gfn_stolen_bits);
 	bool nx_huge_page_workaround_enabled = is_nx_huge_page_enabled();
 	bool write = error_code & PFERR_WRITE_MASK;
 	bool exec = error_code & PFERR_FETCH_MASK;
@@ -593,7 +595,7 @@ int kvm_tdp_mmu_map(struct kvm_vcpu *vcpu, gpa_t gpa, u32 error_code,
 		return RET_PF_RETRY;
 
 	ret = tdp_mmu_map_handle_target_level(vcpu, write, map_writable, &iter,
-					      pfn, prefault);
+					      pfn, prefault, pte_access);
 
 	return ret;
 }

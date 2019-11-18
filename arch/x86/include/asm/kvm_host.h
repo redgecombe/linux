@@ -216,6 +216,7 @@ enum x86_intercept_stage;
 #define PFERR_RSVD_BIT 3
 #define PFERR_FETCH_BIT 4
 #define PFERR_PK_BIT 5
+#define PFERR_XO_ALIAS_BIT 30
 #define PFERR_READ_BIT 31
 #define PFERR_GUEST_FINAL_BIT 32
 #define PFERR_GUEST_PAGE_BIT 33
@@ -226,10 +227,11 @@ enum x86_intercept_stage;
 #define PFERR_RSVD_MASK (1U << PFERR_RSVD_BIT)
 #define PFERR_FETCH_MASK (1U << PFERR_FETCH_BIT)
 #define PFERR_PK_MASK (1U << PFERR_PK_BIT)
+#define PFERR_XO_ALIAS_MASK (1ULL << PFERR_XO_ALIAS_BIT)
 #define PFERR_READ_MASK (1ULL << PFERR_READ_BIT)
 
-#define PFERR_ALIAS_MASK (0)
-#define PFERR_SYNTHETIC_MASK (PFERR_READ_MASK)
+#define PFERR_ALIAS_MASK (PFERR_XO_ALIAS_MASK)
+#define PFERR_SYNTHETIC_MASK (PFERR_XO_ALIAS_MASK | PFERR_READ_MASK)
 
 #define PFERR_GUEST_FINAL_MASK (1ULL << PFERR_GUEST_FINAL_BIT)
 #define PFERR_GUEST_PAGE_MASK (1ULL << PFERR_GUEST_PAGE_BIT)
@@ -273,7 +275,8 @@ union kvm_mmu_page_role {
 		unsigned smap_andnot_wp:1;
 		unsigned ad_disabled:1;
 		unsigned guest_mode:1;
-		unsigned :5;
+		unsigned kvm_xo:1;
+		unsigned :4;
 
 		/*
 		 * This is left at the top of the word so that
@@ -811,6 +814,8 @@ struct kvm_vcpu_arch {
 		 */
 		bool enforce;
 	} pv_cpuid;
+
+	bool pv_xo_enforce_disable;
 };
 
 struct kvm_lpage_info {
@@ -999,6 +1004,10 @@ struct kvm_arch {
 		bool default_allow:1;
 		struct msr_bitmap_range ranges[16];
 	} msr_filter;
+	/* Mask with aliased bits set */
+	gpa_t gpa_stolen_mask;
+	/* Mask with xo bit set */
+	gpa_t gpa_xo_mask;
 
 	struct kvm_pmu_event_filter *pmu_event_filter;
 	struct task_struct *nx_lpage_recovery_thread;
