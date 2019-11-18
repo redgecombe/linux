@@ -1264,6 +1264,7 @@ static const u32 emulated_msrs_all[] = {
 
 	MSR_KVM_ASYNC_PF_EN, MSR_KVM_STEAL_TIME,
 	MSR_KVM_PV_EOI_EN, MSR_KVM_ASYNC_PF_INT, MSR_KVM_ASYNC_PF_ACK,
+	MSR_KVM_EXEC_ONLY_EN, MSR_KVM_EXEC_ONLY_ENFORCED,
 
 	MSR_IA32_TSC_ADJUST,
 	MSR_IA32_TSCDEADLINE,
@@ -3215,7 +3216,26 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 
 		vcpu->arch.msr_kvm_poll_control = data;
 		break;
+	case MSR_KVM_EXEC_ONLY_EN:
+		if (!msr_info->host_initiated && !is_xo_cap_enabled(vcpu))
+			return 1;
 
+		/* XO bit position written must match what cap enabled */
+		if ((data & MSR_KVM_EXEC_ONLY_BIT_POS_MASK) !=
+		    ilog2(vcpu->kvm->arch.gpa_xo_mask))
+			return 1;
+
+		kvm_xo_enable(vcpu->kvm, data & MSR_KVM_EXEC_ONLY_ENABLE_MASK);
+		break;
+	case MSR_KVM_EXEC_ONLY_ENFORCED:
+		if (!msr_info->host_initiated && !is_xo_cap_enabled(vcpu))
+			return 1;
+
+		if (data & (-1ULL << 1))
+			return 1;
+
+		vcpu_xo_enforced_toggle(vcpu, data & KVM_MSR_ENABLED);
+		break;
 	case MSR_IA32_MCG_CTL:
 	case MSR_IA32_MCG_STATUS:
 	case MSR_IA32_MC0_CTL ... MSR_IA32_MCx_CTL(KVM_MAX_MCE_BANKS) - 1:
@@ -3517,6 +3537,16 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 			return 1;
 
 		msr_info->data = vcpu->arch.pv_eoi.msr_val;
+		break;
+	case MSR_KVM_EXEC_ONLY_EN:
+		msr_info->data = 0;
+		if (vcpu->kvm->arch.gpa_xo_mask)
+			msr_info->data = ilog2(vcpu->kvm->arch.gpa_xo_mask);
+		if (is_xo_paging(vcpu))
+			msr_info->data |= MSR_KVM_EXEC_ONLY_ENABLE_MASK;
+		break;
+	case MSR_KVM_EXEC_ONLY_ENFORCED:
+		msr_info->data = !vcpu->arch.pv_xo_enforce_disable;
 		break;
 	case MSR_KVM_POLL_CONTROL:
 		if (!guest_pv_has(vcpu, KVM_FEATURE_POLL_CONTROL))
@@ -8754,6 +8784,8 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		}
 		if (kvm_check_request(KVM_REQ_MMU_RELOAD, vcpu))
 			kvm_mmu_unload(vcpu);
+		if (kvm_check_request(KVM_REQ_MMU_RESET_CONTEXT, vcpu))
+			kvm_mmu_reset_context(vcpu);
 		if (kvm_check_request(KVM_REQ_MIGRATE_TIMER, vcpu))
 			__kvm_migrate_timers(vcpu);
 		if (kvm_check_request(KVM_REQ_MASTERCLOCK_UPDATE, vcpu))

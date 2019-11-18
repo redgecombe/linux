@@ -301,4 +301,42 @@ static inline bool is_xo_enforced(struct kvm_vcpu *vcpu)
 	return is_xo_paging(vcpu) && !vcpu->arch.pv_xo_enforce_disable;
 }
 
+static inline bool is_xo_cap_enabled(struct kvm_vcpu *vcpu)
+{
+	return vcpu->kvm->arch.gpa_xo_mask;
+}
+
+static inline void kvm_xo_enable(struct kvm *kvm, bool on)
+{
+	u64 old_mask;
+
+	spin_lock(&kvm->mmu_lock);
+
+	old_mask = kvm->arch.gpa_stolen_mask;
+	if (on)
+		kvm->arch.gpa_stolen_mask |= kvm->arch.gpa_xo_mask;
+	else
+		kvm->arch.gpa_stolen_mask &= ~kvm->arch.gpa_xo_mask;
+
+	if (old_mask ^ kvm->arch.gpa_stolen_mask)
+		kvm_make_all_cpus_request(kvm, KVM_REQ_MMU_RESET_CONTEXT);
+
+	spin_unlock(&kvm->mmu_lock);
+
+	if (!on)
+		kvm_mmu_zap_all(kvm);
+}
+
+static inline void vcpu_xo_enforced_toggle(struct kvm_vcpu *vcpu, bool enforce)
+{
+	bool old_val;
+
+	old_val = vcpu->arch.pv_xo_enforce_disable;
+
+	vcpu->arch.pv_xo_enforce_disable = !enforce;
+
+	if (old_val == enforce)
+		kvm_mmu_reset_context(vcpu);
+}
+
 #endif
