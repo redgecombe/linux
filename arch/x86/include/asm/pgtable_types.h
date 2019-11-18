@@ -40,6 +40,12 @@
 /* - if the user mapped it with PROT_NONE; pte_present gives true */
 #define _PAGE_BIT_PROTNONE	_PAGE_BIT_GLOBAL
 
+#ifndef __ASSEMBLY__
+extern unsigned int __pgtable_pv_xo_bit;
+#define _page_xo	(pgtable_pv_xo_enabled() ? \
+			(_AT(pteval_t, 1) << __pgtable_pv_xo_bit) : 0)
+#endif /* __ASSEMBLY__ */
+
 #define _PAGE_PRESENT	(_AT(pteval_t, 1) << _PAGE_BIT_PRESENT)
 #define _PAGE_RW	(_AT(pteval_t, 1) << _PAGE_BIT_RW)
 #define _PAGE_USER	(_AT(pteval_t, 1) << _PAGE_BIT_USER)
@@ -166,6 +172,7 @@ enum page_cache_mode {
 #define ___D _PAGE_DIRTY
 #define ___G _PAGE_GLOBAL
 #define __NX _PAGE_NX
+#define __xo _page_xo
 
 #define _ENC _PAGE_ENC
 #define __WP _PAGE_CACHE_WP
@@ -178,14 +185,15 @@ enum page_cache_mode {
 
 #define _PAGE_PAT_LARGE		(_AT(pteval_t, 1) << _PAGE_BIT_PAT_LARGE)
 
-#define PAGE_NONE	     __pg(   0|   0|   0|___A|   0|   0|   0|___G)
-#define PAGE_SHARED	     __pg(__PP|__RW|_USR|___A|__NX|   0|   0|   0)
-#define PAGE_SHARED_EXEC     __pg(__PP|__RW|_USR|___A|   0|   0|   0|   0)
-#define PAGE_COPY_NOEXEC     __pg(__PP|   0|_USR|___A|__NX|   0|   0|   0)
-#define PAGE_COPY_EXEC	     __pg(__PP|   0|_USR|___A|   0|   0|   0|   0)
-#define PAGE_COPY	     __pg(__PP|   0|_USR|___A|__NX|   0|   0|   0)
-#define PAGE_READONLY	     __pg(__PP|   0|_USR|___A|__NX|   0|   0|   0)
-#define PAGE_READONLY_EXEC   __pg(__PP|   0|_USR|___A|   0|   0|   0|   0)
+#define PAGE_NONE	     __pg(   0|   0|   0|___A|   0|   0|   0|___G|   0)
+#define PAGE_SHARED	     __pg(__PP|__RW|_USR|___A|__NX|   0|   0|   0|   0)
+#define PAGE_SHARED_EXEC     __pg(__PP|__RW|_USR|___A|   0|   0|   0|   0|   0)
+#define PAGE_COPY_NOEXEC     __pg(__PP|   0|_USR|___A|__NX|   0|   0|   0|   0)
+#define PAGE_COPY_EXEC	     __pg(__PP|   0|_USR|___A|   0|   0|   0|   0|   0)
+#define PAGE_COPY	     __pg(__PP|   0|_USR|___A|__NX|   0|   0|   0|   0)
+#define PAGE_READONLY	     __pg(__PP|   0|_USR|___A|__NX|   0|   0|   0|   0)
+#define PAGE_READONLY_EXEC   __pg(__PP|   0|_USR|___A|   0|   0|   0|   0|   0)
+#define PAGE_EXECONLY	     __pg(__PP|   0|_USR|___A|   0|   0|   0|   0|__xo)
 
 #define __PAGE_KERNEL		 (__PP|__RW|   0|___A|__NX|___D|   0|___G)
 #define __PAGE_KERNEL_EXEC	 (__PP|__RW|   0|___A|   0|___D|   0|___G)

@@ -740,6 +740,43 @@ static void __init kvm_apic_init(void)
 #endif
 }
 
+#ifdef CONFIG_PARAVIRT_EXEC_ONLY
+unsigned int __pgtable_pv_xo_enabled __ro_after_init;
+unsigned int __pgtable_pv_xo_bit __ro_after_init;
+
+__init static void kvm_init_mem_mapping(void)
+{
+	unsigned long xo_bit;
+
+	if (!kvm_para_has_feature(KVM_FEATURE_EXEC_ONLY))
+		return;
+
+	rdmsrl(MSR_KVM_EXEC_ONLY_EN, xo_bit);
+	xo_bit &= MSR_KVM_EXEC_ONLY_BIT_POS_MASK;
+
+	if (xo_bit >= boot_cpu_data.x86_phys_bits) {
+		pr_err("KVM execute-only bit in unsupported position, not enabling\n");
+		return;
+	}
+
+	/*
+	 * If KVM XO is active, the top physical address bit is the permisison
+	 * bit, so zero it in the mask.
+	 */
+	physical_mask &= ~BIT_ULL(xo_bit);
+	boot_cpu_data.x86_phys_bits--;
+
+	wrmsrl(MSR_KVM_EXEC_ONLY_EN, MSR_KVM_EXEC_ONLY_ENABLE_MASK | xo_bit);
+
+	__pgtable_pv_xo_enabled = 1;
+	__pgtable_pv_xo_bit = xo_bit;
+
+	pr_info("KVM setup pv execute-only memory permissions\n");
+}
+#else /* CONFIG_PARAVIRT_EXEC_ONLY */
+static inline void kvm_init_mem_mapping(void) {}
+#endif /* CONFIG_PARAVIRT_EXEC_ONLY */
+
 static void __init kvm_init_platform(void)
 {
 	kvmclock_init();
@@ -770,6 +807,7 @@ const __initconst struct hypervisor_x86 x86_hyper_kvm = {
 	.init.guest_late_init		= kvm_guest_init,
 	.init.x2apic_available		= kvm_para_available,
 	.init.init_platform		= kvm_init_platform,
+	.init.init_mem_mapping  	= kvm_init_mem_mapping,
 #if defined(CONFIG_AMD_MEM_ENCRYPT)
 	.runtime.sev_es_hcall_prepare	= kvm_sev_es_hcall_prepare,
 	.runtime.sev_es_hcall_finish	= kvm_sev_es_hcall_finish,

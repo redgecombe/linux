@@ -43,6 +43,21 @@ static inline bool pgtable_l5_enabled(void)
 extern unsigned int pgdir_shift;
 extern unsigned int ptrs_per_p4d;
 
+#ifdef CONFIG_PARAVIRT_EXEC_ONLY
+extern unsigned int __pgtable_pv_xo_enabled;
+
+/*
+ * cpu_feature_enabled() is not available in early boot code.
+ * Use variable instead.
+ */
+static inline bool pgtable_pv_xo_enabled(void)
+{
+	return __pgtable_pv_xo_enabled;
+}
+#else
+#define pgtable_pv_xo_enabled() 0
+#endif /* CONFIG_PARAVIRT_EXEC_ONLY */
+
 #endif	/* !__ASSEMBLY__ */
 
 #define SHARED_KERNEL_PMD	0
