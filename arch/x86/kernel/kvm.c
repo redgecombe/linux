@@ -745,9 +745,47 @@ static bool __init kvm_msi_ext_dest_id(void)
 	return kvm_para_has_feature(KVM_FEATURE_MSI_EXT_DEST_ID);
 }
 
+#ifdef CONFIG_PARAVIRT_EXEC_ONLY
+unsigned int __pgtable_pv_xo_enabled __ro_after_init;
+unsigned int __pgtable_pv_xo_bit __ro_after_init;
+
+__init static void kvm_init_xo(void)
+{
+	unsigned long xo_bit;
+
+	if (!kvm_para_has_feature(KVM_FEATURE_EXEC_ONLY))
+		return;
+
+	rdmsrl(MSR_KVM_EXEC_ONLY_EN, xo_bit);
+	xo_bit &= MSR_KVM_EXEC_ONLY_BIT_POS_MASK;
+
+	if (xo_bit >= boot_cpu_data.x86_phys_bits) {
+		pr_err("KVM execute-only bit in unsupported position, not enabling\n");
+		return;
+	}
+
+	/*
+	 * If KVM XO is active, the top physical address bit is the permisison
+	 * bit, so zero it in the mask.
+	 */
+	physical_mask &= ~BIT_ULL(xo_bit);
+	boot_cpu_data.x86_phys_bits--;
+
+	wrmsrl(MSR_KVM_EXEC_ONLY_EN, MSR_KVM_EXEC_ONLY_ENABLE_MASK | xo_bit);
+
+	__pgtable_pv_xo_enabled = 1;
+	__pgtable_pv_xo_bit = xo_bit;
+
+	pr_info("KVM setup pv execute-only memory permissions\n");
+}
+#else /* CONFIG_PARAVIRT_EXEC_ONLY */
+__init static inline void kvm_init_xo(void) {}
+#endif /* CONFIG_PARAVIRT_EXEC_ONLY */
+
 static void __init kvm_init_platform(void)
 {
 	kvmclock_init();
+	kvm_init_xo();
 	x86_platform.apic_post_init = kvm_apic_init;
 }
 
