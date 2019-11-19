@@ -127,6 +127,8 @@ module_param(kvmclock_periodic_sync, bool, S_IRUGO);
 
 bool __read_mostly kvm_has_tsc_control;
 EXPORT_SYMBOL_GPL(kvm_has_tsc_control);
+bool __read_mostly kvm_has_tdp_exec_only;
+EXPORT_SYMBOL_GPL(kvm_has_tdp_exec_only);
 u32  __read_mostly kvm_max_guest_tsc_khz;
 EXPORT_SYMBOL_GPL(kvm_max_guest_tsc_khz);
 u8   __read_mostly kvm_tsc_scaling_ratio_frac_bits;
@@ -5299,6 +5301,21 @@ split_irqchip_unlock:
 	case KVM_CAP_X86_USER_SPACE_MSR:
 		kvm->arch.user_space_msr_mask = cap->args[0];
 		r = 0;
+		break;
+	case KVM_CAP_EXEC_ONLY:
+		r = 0;
+		mutex_lock(&kvm->lock);
+		/*
+		 * The XO bit needs to be less than the HW supported maxphyaddr
+		 * and high enough to only include PAE and long guest paging
+		 * modes. TDP MMU currently does not support stolen bits.
+		 */
+		if (cap->args[0] >= boot_cpu_data.x86_phys_bits || cap->args[0] <= 36 ||
+		    !kvm_has_tdp_exec_only)
+			r = -EINVAL;
+		else
+			kvm->arch.gpa_xo_mask = BIT_ULL(cap->args[0]);
+		mutex_unlock(&kvm->lock);
 		break;
 	default:
 		r = -EINVAL;

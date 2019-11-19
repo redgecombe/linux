@@ -1409,6 +1409,8 @@ u64 vcpu_tsc_khz(struct kvm_vcpu *vcpu);
 
 /* control of guest tsc rate supported? */
 extern bool kvm_has_tsc_control;
+/* execute-only permissions supported? */
+extern bool kvm_has_tdp_exec_only;
 /* maximum supported tsc_khz for guests */
 extern u32  kvm_max_guest_tsc_khz;
 /* number of bits of the fractional part of the TSC scaling ratio */
