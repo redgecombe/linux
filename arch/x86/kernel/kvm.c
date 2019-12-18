@@ -781,6 +781,8 @@ __init static void kvm_init_xo(void)
 	/* Adjust userspace protection map for shared PROT_EXEC */
 	protection_map[S100] = page_execonly;
 
+	setup_force_cpu_cap(X86_FEATURE_XOM_PERMISSION);
+
 	pr_info("KVM setup pv execute-only memory permissions\n");
 }
 #else /* CONFIG_PARAVIRT_EXEC_ONLY */
