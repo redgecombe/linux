@@ -376,3 +376,28 @@ data:
 	write '1' to bit 0 of the MSR, this causes the host to re-scan its queue
 	and check if there are more notifications pending. The MSR is available
 	if KVM_FEATURE_ASYNC_PF_INT is present in CPUID.
+
+MSR_KVM_EXEC_ONLY_EN:
+	0x4b564d08
+
+	Control execute-only (XO) permission bit
+
+data:
+	Bits 7:0 encode the XO permission bit position in page tables, bit 8
+	enables (1) or disables (0) the XO permission bit.
+
+	For more information see KVM_CAP_EXEC_ONLY in
+	Documentation/virt/kvm/api.txt
+
+MSR_KVM_EXEC_ONLY_ENFORCED:
+	0x4b564d09
+
+	Control enforcement of execute-only (XO) permission bit.
+
+data:
+	When bit 0 is 0, the execute-only (XO) permission bit on the vcpu is
+	not enforced, and read and write accesses will not generate faults for
+	memory mapped to the XO alias. When the value is 1, RW accesses to the XO
+	alias will generate faults. MSR_KVM_EXEC_ONLY_ENFORCED is a per-vcpu MSR,
+	where MSR_KVM_EXEC_ONLY_EN is a per-vm MSR. The default value is 1,
+	enforced.
