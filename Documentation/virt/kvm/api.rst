@@ -6014,6 +6014,56 @@ KVM_EXIT_X86_RDMSR and KVM_EXIT_X86_WRMSR exit notifications which user space
 can then handle to implement model specific MSR handling and/or user notifications
 to inform a user that an MSR was not handled.
 
+7.22 KVM_CAP_EXEC_ONLY
+----------------------
+
+Architectures: x86
+Parameters: args[0] the bit to be used as an XO bit in the guest page tables
+
+With this capability enabled, the bit specified when enabling the capability
+will work as an execute-only permission bit in the guest page table entries.
+This capability can only be set if the VM satifies the following conditions:
+	1. The XO bit has to be
+		- less than the host MAXPHYADDR
+		- more than 36
+	3. The HOST CPU has to support XO as a TDP permissions
+
+If these conditions are violated, the call will return -EINVAL. If the XO bit
+is set to be more than *guest* MAXPHYADDR, but less than the host or if it is
+set to be less than the highest physical memory assigned to the system this is
+likley to cause problems for the guest, but is not strictly illegal from the
+standpoint of this capability.
+
+If the KVM XO CPUID bit is set, the guest can enable XO with the KVM XO MSR. The
+guest can also retrieve the position of the XO bit in the page table entry with
+the MSR.
+
+Once KVM XO is enabled, the execute-only permission bit will instead restrict
+reading and writing of the memory mapped by the PTE, however the existing page
+table permission bits are still enforced as well. This can result in some
+strangely defined permission combinations:
+XO=1, NX=1	- This page would not be able to executed, written to or read from.
+XO=1, R/W=1	- This page could be executed, but not written to or read from.
+
+In the case of a write, the error code will be as it is for read only memory.
+For a read to XO memory, the error code will be P=1, W/R=0, RSVD=0, I/D=0, and
+whichever U/S bit value matches the access.
+
+Unlike other permission bits settable in PTEs, this bit is not ORed with other
+bits encountered in the walk of the upper level page tables. Instead it behaves
+like a RSVD bit in the PTEs that have PS=0. If this bit is set in a PTE with
+PS=0, the page fault error code will be missing the WRITE bit where it would be
+normally for PTE RSVD bits due to the difficulty in determining what the value
+of the bit should be from KVM.
+
+In the case the guest maps a private memslot as XO, KVM will treat it as a no
+slot pfn and return a KVM_EXIT_MMIO to userspace.
+
+This bit will be usable in long mode and PAE paging. Due to the restriction of
+the bit being in a position higher than 36, it will not be usable in 32 bit
+paging, PSE-36 or EPT page tables. It is supported for every paging structure
+entry format in the supported paging modes.
+
 8. Other capabilities.
 ======================
 
