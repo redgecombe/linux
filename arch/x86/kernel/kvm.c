@@ -775,6 +775,8 @@ __init static void kvm_init_mem_mapping(void)
 	protection_map[4] = PAGE_EXECONLY;
 	protection_map[12] = PAGE_EXECONLY;
 
+	setup_force_cpu_cap(X86_FEATURE_EXEC_ONLY);
+
 	pr_info("KVM setup pv execute-only memory permissions\n");
 }
 #else /* CONFIG_PARAVIRT_EXEC_ONLY */
