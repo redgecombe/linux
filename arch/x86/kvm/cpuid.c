@@ -798,6 +798,9 @@ static inline int __do_cpuid_func(struct kvm_cpuid_array *array, u32 function)
 		if (sched_info_on())
 			entry->eax |= (1 << KVM_FEATURE_STEAL_TIME);
 
+		if (kvm_has_tdp_exec_only)
+			entry->eax |= (1 << KVM_FEATURE_EXEC_ONLY);
+
 		entry->ebx = 0;
 		entry->ecx = 0;
 		entry->edx = 0;
