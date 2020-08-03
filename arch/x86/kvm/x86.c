@@ -749,7 +749,7 @@ static inline u64 pdptr_rsvd_bits(struct kvm_vcpu *vcpu)
  */
 int load_pdptrs(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu, unsigned long cr3)
 {
-	gfn_t pdpt_gfn = cr3 >> PAGE_SHIFT;
+	gfn_t pdpt_gfn = gpa_to_gfn(cr3 & ~gpa_stolen_mask(vcpu->kvm));
 	unsigned offset = ((cr3 & (PAGE_SIZE-1)) >> 5) << 2;
 	int i;
 	int ret;

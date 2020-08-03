@@ -220,4 +220,31 @@ int kvm_arch_write_log_dirty(struct kvm_vcpu *vcpu);
 int kvm_mmu_post_init_vm(struct kvm *kvm);
 void kvm_mmu_pre_destroy_vm(struct kvm *kvm);
 
+static inline void warn_on_and_strip_synthetic(u64 *error_code)
+{
+	/*
+	 * KVM hijacks some error code bits to communicate information about the
+	 * access not covered by the standard error code bits. Ensure that they
+	 * are not unexpectedly set by some new CPU.
+	 */
+	if (WARN_ON_ONCE(*error_code & PFERR_SYNTHETIC_MASK))
+		*error_code &= ~PFERR_SYNTHETIC_MASK;
+}
+
+static inline gpa_t gpa_stolen_mask(struct kvm *kvm)
+{
+	/* Currently there are no stolen bits in KVM */
+	return 0;
+}
+
+static inline gpa_t pf_error_to_stolen(struct kvm *kvm, u32 error_code)
+{
+	return 0;
+}
+
+static inline u32 stolen_to_pf_error(struct kvm *kvm, gpa_t gpa)
+{
+	return 0;
+}
+
 #endif

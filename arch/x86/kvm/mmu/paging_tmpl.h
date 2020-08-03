@@ -533,6 +533,8 @@ FNAME(prefetch_gpte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 	gfn_t gfn;
 	kvm_pfn_t pfn;
 
+	WARN_ON(gpte & gpa_stolen_mask(vcpu->kvm));
+
 	if (FNAME(prefetch_invalid_gpte)(vcpu, sp, spte, gpte))
 		return false;
 
@@ -640,6 +642,8 @@ static int FNAME(fetch)(struct kvm_vcpu *vcpu, gpa_t addr,
 	gfn_t base_gfn = gw->gfn;
 
 	direct_access = gw->pte_access;
+
+	WARN_ON(addr & gpa_stolen_mask(vcpu->kvm));
 
 	top_level = vcpu->arch.mmu->root_level;
 	if (top_level == PT32E_ROOT_LEVEL)
