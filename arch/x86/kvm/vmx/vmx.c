@@ -5321,6 +5321,8 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	error_code |= (exit_qualification & 0x100) != 0 ?
 	       PFERR_GUEST_FINAL_MASK : PFERR_GUEST_PAGE_MASK;
 
+	error_code |= stolen_to_pf_error(vcpu->kvm, gpa);
+
 	vcpu->arch.exit_qualification = exit_qualification;
 
 	/*
@@ -5334,25 +5336,31 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	if (unlikely(allow_smaller_maxphyaddr && kvm_vcpu_is_illegal_gpa(vcpu, gpa)))
 		return kvm_emulate_instruction(vcpu, 0);
 
-	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
+	return kvm_mmu_page_fault(vcpu, gpa & ~gpa_stolen_mask(vcpu->kvm), error_code, NULL, 0);
 }
 
 static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 {
 	gpa_t gpa;
+	u64 error_code = PFERR_RSVD_MASK;
+
+	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+
+	error_code |= stolen_to_pf_error(vcpu->kvm, gpa);
+
+	gpa &= ~gpa_stolen_mask(vcpu->kvm);
 
 	/*
 	 * A nested guest cannot optimize MMIO vmexits, because we have an
 	 * nGPA here instead of the required GPA.
 	 */
-	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 	if (!is_guest_mode(vcpu) &&
 	    !kvm_io_bus_write(vcpu, KVM_FAST_MMIO_BUS, gpa, 0, NULL)) {
 		trace_kvm_fast_mmio(gpa);
 		return kvm_skip_emulated_instruction(vcpu);
 	}
 
-	return kvm_mmu_page_fault(vcpu, gpa, PFERR_RSVD_MASK, NULL, 0);
+	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
 }
 
 static int handle_nmi_window(struct kvm_vcpu *vcpu)
@@ -5711,7 +5719,7 @@ static void vmx_flush_pml_buffer(struct kvm_vcpu *vcpu)
 	for (; pml_idx < PML_ENTITY_NUM; pml_idx++) {
 		u64 gpa;
 
-		gpa = pml_buf[pml_idx];
+		gpa = pml_buf[pml_idx] & ~gpa_stolen_mask(vcpu->kvm);
 		WARN_ON(gpa & (PAGE_SIZE - 1));
 		kvm_vcpu_mark_page_dirty(vcpu, gpa >> PAGE_SHIFT);
 	}

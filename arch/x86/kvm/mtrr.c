@@ -76,6 +76,7 @@ bool kvm_mtrr_valid(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 	WARN_ON(!(msr >= 0x200 && msr < 0x200 + 2 * KVM_NR_VAR_MTRR));
 
 	mask = (~0ULL) << cpuid_maxphyaddr(vcpu);
+	mask |= gpa_stolen_mask(vcpu->kvm);
 	if ((msr & 1) == 0) {
 		/* MTRR base */
 		if (!valid_mtrr_type(data & 0xff))
