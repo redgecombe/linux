@@ -776,6 +776,11 @@ __init static void kvm_init_xo(void)
 	__pgtable_pv_xo_enabled = 1;
 	__pgtable_pv_xo_bit = xo_bit;
 
+	/* Adjust userspace protection map for private PROT_EXEC */
+	protection_map[P100] = page_execonly;
+	/* Adjust userspace protection map for shared PROT_EXEC */
+	protection_map[S100] = page_execonly;
+
 	pr_info("KVM setup pv execute-only memory permissions\n");
 }
 #else /* CONFIG_PARAVIRT_EXEC_ONLY */
