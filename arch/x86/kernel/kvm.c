@@ -771,6 +771,10 @@ __init static void kvm_init_mem_mapping(void)
 	__pgtable_pv_xo_enabled = 1;
 	__pgtable_pv_xo_bit = xo_bit;
 
+	/* Adjust userspace protection map */
+	protection_map[4] = PAGE_EXECONLY;
+	protection_map[12] = PAGE_EXECONLY;
+
 	pr_info("KVM setup pv execute-only memory permissions\n");
 }
 #else /* CONFIG_PARAVIRT_EXEC_ONLY */
