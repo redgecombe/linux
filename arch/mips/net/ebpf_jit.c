@@ -1799,7 +1799,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	struct bpf_prog *orig_prog = prog;
 	bool tmp_blinded = false;
 	struct bpf_prog *tmp;
-	struct bpf_binary_header *header = NULL;
+	struct perm_allocation *header = NULL;
 	struct jit_ctx ctx;
 	unsigned int image_size;
 	u8 *image_ptr;
@@ -1889,6 +1889,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 				      sizeof(u32), jit_fill_hole);
 	if (header == NULL)
 		goto out_err;
+	prog->alloc = header;
 
 	ctx.target = (u32 *)image_ptr;
 

@@ -2298,7 +2298,7 @@ bool bpf_jit_needs_zext(void)
 
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
-	struct bpf_binary_header *header = NULL;
+	struct perm_allocation *header = NULL;
 	struct bpf_prog *tmp, *orig_prog = prog;
 	int proglen, oldproglen = 0;
 	struct jit_context ctx = {};
@@ -2370,6 +2370,7 @@ out_image:
 				prog = orig_prog;
 				goto out_addrs;
 			}
+			prog->alloc = header;
 		}
 		oldproglen = proglen;
 		cond_resched();

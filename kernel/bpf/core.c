@@ -530,13 +530,13 @@ long bpf_jit_limit   __read_mostly;
 static void
 bpf_prog_ksym_set_addr(struct bpf_prog *prog)
 {
-	const struct bpf_binary_header *hdr = bpf_jit_binary_hdr(prog);
-	unsigned long addr = (unsigned long)hdr;
+	const struct perm_allocation *alloc = prog->alloc;
+	unsigned long addr = perm_alloc_address(alloc);
 
 	WARN_ON_ONCE(!bpf_prog_ebpf_jited(prog));
 
-	prog->aux->ksym.start = (unsigned long) prog->bpf_func;
-	prog->aux->ksym.end   = addr + hdr->pages * PAGE_SIZE;
+	prog->aux->ksym.start = (unsigned long) addr;
+	prog->aux->ksym.end   = addr +  alloc->size;
 }
 
 static void
@@ -843,22 +843,23 @@ static void bpf_jit_uncharge_modmem(u32 pages)
 	atomic_long_sub(pages, &bpf_jit_current);
 }
 
-void *__weak bpf_jit_alloc_exec(unsigned long size)
+struct perm_allocation * __weak bpf_jit_alloc_exec(unsigned long size)
 {
-	return module_alloc(size);
+	/* Note: Range ignored for default perm_alloc implementation */
+	return perm_alloc(0, 0, size >> PAGE_SHIFT, PERM_RX);
 }
 
-void __weak bpf_jit_free_exec(void *addr)
+void __weak bpf_jit_free_exec(struct perm_allocation *alloc)
 {
-	module_memfree(addr);
+	perm_free(alloc);
 }
 
-struct bpf_binary_header *
+struct perm_allocation *
 bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 		     unsigned int alignment,
 		     bpf_jit_fill_hole_t bpf_fill_ill_insns)
 {
-	struct bpf_binary_header *hdr;
+	struct perm_allocation *alloc;
 	u32 size, hole, start, pages;
 
 	WARN_ON_ONCE(!is_power_of_2(alignment) ||
@@ -868,36 +869,35 @@ bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 	 * fill a page, allow at least 128 extra bytes to insert a
 	 * random section of illegal instructions.
 	 */
-	size = round_up(proglen + sizeof(*hdr) + 128, PAGE_SIZE);
+	size = round_up(proglen + 128, PAGE_SIZE);
 	pages = size / PAGE_SIZE;
 
 	if (bpf_jit_charge_modmem(pages))
 		return NULL;
-	hdr = bpf_jit_alloc_exec(size);
-	if (!hdr) {
+	alloc = bpf_jit_alloc_exec(size);
+	if (!alloc) {
 		bpf_jit_uncharge_modmem(pages);
 		return NULL;
 	}
 
 	/* Fill space with illegal/arch-dep instructions. */
-	bpf_fill_ill_insns(hdr, size);
+	bpf_fill_ill_insns((void *)perm_writable_base(alloc), size);
 
-	hdr->pages = pages;
-	hole = min_t(unsigned int, size - (proglen + sizeof(*hdr)),
-		     PAGE_SIZE - sizeof(*hdr));
+	hole = min_t(unsigned int, size - proglen,
+		     PAGE_SIZE);
 	start = (get_random_int() % hole) & ~(alignment - 1);
 
 	/* Leave a random number of instructions before BPF code. */
-	*image_ptr = &hdr->image[start];
+	*image_ptr = (void *)perm_alloc_address(alloc) + start;
 
-	return hdr;
+	return alloc;
 }
 
-void bpf_jit_binary_free(struct bpf_binary_header *hdr)
+void bpf_jit_binary_free(struct perm_allocation *alloc)
 {
-	u32 pages = hdr->pages;
+	u32 pages = alloc->size >> PAGE_SHIFT;
 
-	bpf_jit_free_exec(hdr);
+	bpf_jit_free_exec(alloc);
 	bpf_jit_uncharge_modmem(pages);
 }
 
@@ -908,9 +908,7 @@ void bpf_jit_binary_free(struct bpf_binary_header *hdr)
 void __weak bpf_jit_free(struct bpf_prog *fp)
 {
 	if (fp->jited) {
-		struct bpf_binary_header *hdr = bpf_jit_binary_hdr(fp);
-
-		bpf_jit_binary_free(hdr);
+		bpf_jit_binary_free(fp->alloc);
 
 		WARN_ON_ONCE(!bpf_prog_kallsyms_verify_off(fp));
 	}

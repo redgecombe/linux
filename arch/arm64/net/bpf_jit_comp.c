@@ -970,7 +970,7 @@ static inline void bpf_flush_icache(void *start, void *end)
 }
 
 struct arm64_jit_data {
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	u8 *image;
 	struct jit_ctx ctx;
 };
@@ -979,7 +979,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	int image_size, prog_size, extable_size;
 	struct bpf_prog *tmp, *orig_prog = prog;
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	struct arm64_jit_data *jit_data;
 	bool was_classic = bpf_prog_was_classic(prog);
 	bool tmp_blinded = false;
@@ -1055,6 +1055,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		prog = orig_prog;
 		goto out_off;
 	}
+	prog->alloc = header;
 
 	/* 2. Now, the actual pass. */
 

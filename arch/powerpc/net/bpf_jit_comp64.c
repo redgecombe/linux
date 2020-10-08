@@ -1062,7 +1062,7 @@ static int bpf_jit_fixup_subprog_calls(struct bpf_prog *fp, u32 *image,
 }
 
 struct powerpc64_jit_data {
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	u32 *addrs;
 	u8 *image;
 	u32 proglen;
@@ -1085,7 +1085,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 	struct codegen_context cgctx;
 	int pass;
 	int flen;
-	struct bpf_binary_header *bpf_hdr;
+	struct perm_allocation *bpf_hdr;
 	struct bpf_prog *org_fp = fp;
 	struct bpf_prog *tmp_fp;
 	bool bpf_blinded = false;
@@ -1173,6 +1173,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 		fp = org_fp;
 		goto out_addrs;
 	}
+	fp->alloc = header;
 
 skip_init_ctx:
 	code_base = (u32 *)(image + FUNCTION_DESCR_SIZE);
@@ -1249,11 +1250,8 @@ out:
 /* Overriding bpf_jit_free() as we don't set images read-only. */
 void bpf_jit_free(struct bpf_prog *fp)
 {
-	unsigned long addr = (unsigned long)fp->bpf_func & PAGE_MASK;
-	struct bpf_binary_header *bpf_hdr = (void *)addr;
-
 	if (fp->jited)
-		bpf_jit_binary_free(bpf_hdr);
+		bpf_jit_binary_free(fp->alloc);
 
 	bpf_prog_unlock_free(fp);
 }

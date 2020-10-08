@@ -1458,7 +1458,7 @@ bool bpf_jit_needs_zext(void)
 }
 
 struct sparc64_jit_data {
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	u8 *image;
 	struct jit_ctx ctx;
 };
@@ -1467,7 +1467,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	struct bpf_prog *tmp, *orig_prog = prog;
 	struct sparc64_jit_data *jit_data;
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	u32 prev_image_size, image_size;
 	bool tmp_blinded = false;
 	bool extra_pass = false;
@@ -1559,6 +1559,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		prog = orig_prog;
 		goto out_off;
 	}
+	prog->alloc = header;
 
 	ctx.image = (u32 *)image_ptr;
 skip_init_ctx:

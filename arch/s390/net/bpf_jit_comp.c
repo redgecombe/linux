@@ -1686,7 +1686,7 @@ bool bpf_jit_needs_zext(void)
 }
 
 struct s390_jit_data {
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	struct bpf_jit ctx;
 	int pass;
 };
@@ -1721,7 +1721,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 {
 	u32 stack_depth = round_up(fp->aux->stack_depth, 8);
 	struct bpf_prog *tmp, *orig_fp = fp;
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	struct s390_jit_data *jit_data;
 	bool tmp_blinded = false;
 	bool extra_pass = false;
@@ -1785,6 +1785,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 		fp = orig_fp;
 		goto free_addrs;
 	}
+	fp->alloc = header;
 skip_init_ctx:
 	if (bpf_jit_prog(&jit, fp, extra_pass, stack_depth)) {
 		bpf_jit_binary_free(header);

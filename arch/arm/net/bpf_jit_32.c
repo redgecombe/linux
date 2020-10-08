@@ -1874,7 +1874,7 @@ bool bpf_jit_needs_zext(void)
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	struct bpf_prog *tmp, *orig_prog = prog;
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	bool tmp_blinded = false;
 	struct jit_ctx ctx;
 	unsigned int tmp_idx;
@@ -1971,6 +1971,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		prog = orig_prog;
 		goto out_imms;
 	}
+	prog->alloc = header;
 
 	/* 2.) Actual pass to generate final JIT code */
 	ctx.target = (u32 *) image_ptr;

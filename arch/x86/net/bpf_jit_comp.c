@@ -1476,11 +1476,14 @@ emit_jmp:
 		}
 
 		if (image) {
+			unsigned long writable = perm_writable_addr(bpf_prog->alloc,
+								       (unsigned long)image);
+
 			if (unlikely(proglen + ilen > oldproglen)) {
 				pr_err("bpf_jit: fatal error\n");
 				return -EFAULT;
 			}
-			memcpy(image + proglen, temp, ilen);
+			memcpy((void *)writable + proglen, temp, ilen);
 		}
 		proglen += ilen;
 		addrs[i] = proglen;
@@ -1965,16 +1968,21 @@ int arch_prepare_bpf_dispatcher(void *image, s64 *funcs, int num_funcs)
 }
 
 struct x64_jit_data {
-	struct bpf_binary_header *header;
+	struct perm_allocation *header;
 	int *addrs;
 	u8 *image;
 	int proglen;
 	struct jit_context ctx;
 };
 
+struct perm_allocation *bpf_jit_alloc_exec(unsigned long size)
+{
+	return perm_alloc(MODULES_VADDR, MODULES_END, size >> PAGE_SHIFT, PERM_RX);
+}
+
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
-	struct bpf_binary_header *header = NULL;
+	struct perm_allocation *header = NULL;
 	struct bpf_prog *tmp, *orig_prog = prog;
 	struct x64_jit_data *jit_data;
 	int proglen, oldproglen = 0;
@@ -2078,6 +2086,7 @@ out_image:
 				prog = orig_prog;
 				goto out_addrs;
 			}
+			prog->alloc = header;
 			prog->aux->extable = (void *) image + roundup(proglen, align);
 		}
 		oldproglen = proglen;

@@ -517,11 +517,6 @@ struct sock_fprog_kern {
 /* Some arches need doubleword alignment for their instructions and/or data */
 #define BPF_IMAGE_ALIGNMENT 8
 
-struct bpf_binary_header {
-	u32 pages;
-	u8 image[] __aligned(BPF_IMAGE_ALIGNMENT);
-};
-
 struct bpf_prog {
 	u16			pages;		/* Number of allocated pages */
 	u16			jited:1,	/* Is our filter JIT'ed? */
@@ -544,6 +539,8 @@ struct bpf_prog {
 	struct sock_fprog_kern	*orig_prog;	/* Original BPF program */
 	unsigned int		(*bpf_func)(const void *ctx,
 					    const struct bpf_insn *insn);
+	struct perm_allocation *alloc;
+
 	/* Instructions for interpreter */
 	struct sock_filter	insns[0];
 	struct bpf_insn		insnsi[];
@@ -818,20 +815,9 @@ static inline void bpf_prog_lock_ro(struct bpf_prog *fp)
 #endif
 }
 
-static inline void bpf_jit_binary_lock_ro(struct bpf_binary_header *hdr)
+static inline void bpf_jit_binary_lock_ro(struct perm_allocation *alloc)
 {
-	set_vm_flush_reset_perms(hdr);
-	set_memory_ro((unsigned long)hdr, hdr->pages);
-	set_memory_x((unsigned long)hdr, hdr->pages);
-}
-
-static inline struct bpf_binary_header *
-bpf_jit_binary_hdr(const struct bpf_prog *fp)
-{
-	unsigned long real_start = (unsigned long)fp->bpf_func;
-	unsigned long addr = real_start & PAGE_MASK;
-
-	return (void *)addr;
+	perm_writable_finish(alloc);
 }
 
 int sk_filter_trim_cap(struct sock *sk, struct sk_buff *skb, unsigned int cap);
@@ -986,14 +972,14 @@ extern long bpf_jit_limit;
 
 typedef void (*bpf_jit_fill_hole_t)(void *area, unsigned int size);
 
-struct bpf_binary_header *
+struct perm_allocation *
 bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 		     unsigned int alignment,
 		     bpf_jit_fill_hole_t bpf_fill_ill_insns);
-void bpf_jit_binary_free(struct bpf_binary_header *hdr);
+void bpf_jit_binary_free(struct perm_allocation *hdr);
 u64 bpf_jit_alloc_exec_limit(void);
-void *bpf_jit_alloc_exec(unsigned long size);
-void bpf_jit_free_exec(void *addr);
+struct perm_allocation *bpf_jit_alloc_exec(unsigned long size);
+void bpf_jit_free_exec(struct perm_allocation *alloc);
 void bpf_jit_free(struct bpf_prog *fp);
 
 int bpf_jit_add_poke_descriptor(struct bpf_prog *prog,
