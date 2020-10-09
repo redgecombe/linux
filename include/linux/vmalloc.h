@@ -248,4 +248,87 @@ pcpu_free_vm_areas(struct vm_struct **vms, int nr_vms)
 int register_vmap_purge_notifier(struct notifier_block *nb);
 int unregister_vmap_purge_notifier(struct notifier_block *nb);
 
+#define PERM_R	1
+#define PERM_W	2
+#define PERM_X	4
+#define PERM_RWX	(PERM_R|PERM_W|PERM_X)
+#define PERM_RW		(PERM_R|PERM_W)
+#define PERM_RX		(PERM_R|PERM_X)
+
+typedef u8 virtual_perm;
+
+struct perm_allocation {
+	struct page **pages;
+	bool mapped;
+	virtual_perm cur_perm;
+	virtual_perm orig_perm;
+	struct vm_struct *area;
+	unsigned long offset;
+	unsigned long size;
+	void *writable;
+};
+
+/*
+ * Allocate a special permission kva region. The region may not be mapped
+ * until a call to perm_writable_finish(). A writable region will be mapped
+ * immediately at the address returned by perm_writable_addr(). The allocation
+ * will be made between the start and end virtual addresses.
+ */
+struct perm_allocation *perm_alloc(unsigned long vstart, unsigned long vend, unsigned long page_cnt,
+				   virtual_perm perms);
+
+/* The writable address for data to be loaded into the allocation */
+unsigned long perm_writable_addr(struct perm_allocation *alloc, unsigned long addr);
+
+/* The writable address for data to be loaded into the allocation */
+bool perm_writable_finish(struct perm_allocation *alloc);
+
+/* Change the permission of an allocation that is already live */
+bool perm_change(struct perm_allocation *alloc, virtual_perm perms);
+
+/* Free an allocation */
+void perm_free(struct perm_allocation *alloc);
+
+/* Helper for memsetting an allocation. Should be called before perm_writable_finish() */
+void perm_memset(struct perm_allocation *alloc, char val);
+
+/* The final address of the allocation */
+static inline unsigned long perm_alloc_address(const struct perm_allocation *alloc)
+{
+	return (unsigned long)alloc->area->addr + alloc->offset;
+}
+
+/* The size of the allocation */
+static inline unsigned long perm_alloc_size(const struct perm_allocation *alloc)
+{
+	return alloc->size;
+}
+
+static inline unsigned long within_perm_alloc(const struct perm_allocation *alloc,
+					      unsigned long addr)
+{
+	unsigned long base, size;
+
+	if (!alloc)
+		return false;
+
+	base = perm_alloc_address(alloc);
+	size = perm_alloc_size(alloc);
+
+	return base <= addr && addr < base + size;
+}
+
+static inline unsigned long perm_writable_base(struct perm_allocation *alloc)
+{
+	return perm_writable_addr(alloc, perm_alloc_address(alloc));
+}
+
+static inline bool perm_is_writable(struct perm_allocation *alloc)
+{
+	if (!alloc)
+		return false;
+
+	return ((alloc->cur_perm & PERM_W) && alloc->mapped) || alloc->writable;
+}
+
 #endif /* _LINUX_VMALLOC_H */

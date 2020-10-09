@@ -34,6 +34,7 @@
 #include <linux/bitops.h>
 #include <linux/rbtree_augmented.h>
 #include <linux/overflow.h>
+#include <linux/moduleloader.h>
 
 #include <linux/uaccess.h>
 #include <asm/tlbflush.h>
@@ -3087,6 +3088,137 @@ void free_vm_area(struct vm_struct *area)
 	kfree(area);
 }
 EXPORT_SYMBOL_GPL(free_vm_area);
+
+#ifndef CONFIG_ARCH_HAS_PERM_ALLOC_IMPLEMENTATION
+
+#ifndef CONFIG_MODULES
+/* If modules is not configured, provide stubs so perm_alloc() could use fallback logic. */
+void *module_alloc(unsigned long size)
+{
+	return NULL;
+}
+
+void module_memfree(void *module_region) { }
+#endif /* !CONFIG_MODULES */
+
+struct perm_allocation *perm_alloc(unsigned long vstart, unsigned long vend, unsigned long page_cnt,
+				   virtual_perm perms)
+{
+	struct perm_allocation *alloc;
+	unsigned long size = page_cnt << PAGE_SHIFT;
+	void *ptr;
+
+	if (!size)
+		return NULL;
+
+	alloc = kmalloc(sizeof(struct perm_allocation), GFP_KERNEL | __GFP_ZERO);
+
+	if (!alloc)
+		return NULL;
+
+	ptr = module_alloc(size);
+
+	if (!ptr) {
+		kfree(alloc);
+		return NULL;
+	}
+
+	/*
+	 * In order to work with all arch's we call the arch's module_alloc() which is the only
+	 * cross-arch place where information about where an executable allocation should go is
+	 * located. If the caller passed in a different range they want for the allocation...we
+	 * could try a vmalloc_node_range() at this point, but just return NULL for now.
+	 */
+	if ((unsigned long) ptr < vstart || (unsigned long)ptr >= vend) {
+		module_memfree(ptr);
+		kfree(alloc);
+		return NULL;
+	}
+
+	alloc->area = find_vm_area(ptr);
+	alloc->size = size;
+
+	if (IS_ENABLED(CONFIG_ARM) || IS_ENABLED(CONFIG_X86))
+		alloc->cur_perm = PERM_RW;
+	else
+		alloc->cur_perm = PERM_RWX;
+
+	alloc->orig_perm = perms;
+
+	return alloc;
+}
+
+unsigned long perm_writable_addr(struct perm_allocation *alloc, unsigned long addr)
+{
+	return addr;
+}
+
+bool perm_writable_finish(struct perm_allocation *alloc)
+{
+	return perm_change(alloc, alloc->orig_perm);
+}
+
+bool perm_change(struct perm_allocation *alloc, virtual_perm perm)
+{
+	unsigned long start, npages;
+	virtual_perm unset, set;
+
+	if (!alloc)
+		return false;
+
+	npages = alloc->size >> PAGE_SHIFT;
+
+	start = perm_alloc_address(alloc);
+
+	set = ~alloc->cur_perm & perm;
+	unset = alloc->cur_perm & ~perm;
+
+	if (set & PERM_W)
+		set_memory_rw(start, npages);
+
+	if (unset & PERM_W)
+		set_memory_ro(start, npages);
+
+	if (set & PERM_X)
+		set_memory_x(start, npages);
+
+	if (unset & PERM_X)
+		set_memory_nx(start, npages);
+
+	alloc->cur_perm = perm;
+
+	return false;
+}
+
+static inline bool perms_need_reset(struct perm_allocation *alloc)
+{
+	return (alloc->cur_perm & PERM_X) || (~alloc->cur_perm & PERM_W);
+}
+
+void perm_free(struct perm_allocation *alloc)
+{
+	unsigned long addr;
+
+	if (!alloc)
+		return;
+
+	addr = perm_alloc_address(alloc);
+
+	if (perms_need_reset(alloc))
+		set_vm_flush_reset_perms((void *)addr);
+
+	module_memfree((void *)addr);
+
+	kfree(alloc);
+}
+
+void perm_memset(struct perm_allocation *alloc, char val)
+{
+	if (!alloc)
+		return;
+	memset((void *)perm_writable_base(alloc), val, perm_alloc_size(alloc));
+}
+#endif /* CONFIG_ARCH_HAS_PERM_ALLOC_IMPLEMENTATION */
 
 #ifdef CONFIG_SMP
 static struct vmap_area *node_to_va(struct rb_node *n)

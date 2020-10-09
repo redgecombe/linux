@@ -1810,6 +1810,72 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
 	return 0;
 }
 
+struct perm_allocation *perm_alloc(unsigned long vstart, unsigned long vend, unsigned long page_cnt,
+				   virtual_perm perms)
+{
+	struct perm_allocation *alloc;
+	struct vm_struct *area;
+	unsigned long size = page_cnt << PAGE_SHIFT;
+	void *ptr;
+
+	if (!size)
+		return NULL;
+
+	alloc = kmalloc(sizeof(struct perm_allocation), GFP_KERNEL | __GFP_ZERO);
+
+	if (!alloc)
+		return NULL;
+
+	area = kmalloc(sizeof(struct vm_struct), GFP_KERNEL | __GFP_ZERO);
+
+	if (!area)
+		goto free_alloc;
+
+	alloc->area = area;
+
+	ptr = vmalloc(size);
+
+	if (!ptr)
+		goto free_area;
+
+	alloc->size = size;
+	alloc->cur_perm = PERM_RWX;
+
+	return alloc;
+
+free_area:
+	kfree(area);
+free_alloc:
+	kfree(alloc);
+	return NULL;
+}
+
+unsigned long perm_writable_addr(struct perm_allocation *alloc, unsigned long addr)
+{
+	return addr;
+}
+
+bool perm_writable_finish(struct perm_allocation *alloc)
+{
+	return true;
+}
+
+bool perm_change(struct perm_allocation *alloc, virtual_perm perms)
+{
+	return true;
+}
+
+void perm_free(struct perm_allocation *alloc)
+{
+	if (!alloc)
+		return;
+
+	kfree(alloc->area);
+	kfree(alloc);
+}
+
+void perm_memset(struct perm_allocation *alloc, char val) {}
+
 /*
  * Initialise sysctl_user_reserve_kbytes.
  *

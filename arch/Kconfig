@@ -259,6 +259,9 @@ config ARCH_HAS_SET_MEMORY
 config ARCH_HAS_SET_DIRECT_MAP
 	bool
 
+config ARCH_HAS_PERM_ALLOC_IMPLEMENTATION
+	bool
+
 #
 # Select if the architecture provides the arch_dma_set_uncached symbol to
 # either provide an uncached segement alias for a DMA allocation, or
