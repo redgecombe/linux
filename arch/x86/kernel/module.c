@@ -85,6 +85,57 @@ void *module_alloc(unsigned long size)
 	return p;
 }
 
+bool module_perm_alloc(struct module_layout *layout)
+{
+	unsigned long vstart = MODULES_VADDR + get_module_load_offset();
+	unsigned long vend = MODULES_END;
+	unsigned int text_page_cnt = PAGE_ALIGN(layout->text.size) >> PAGE_SHIFT;
+	unsigned int ro_page_cnt = PAGE_ALIGN(layout->ro.size) >> PAGE_SHIFT;
+	unsigned int ro_after_init_page_cnt = PAGE_ALIGN(layout->ro_after_init.size) >> PAGE_SHIFT;
+	unsigned int rw_page_cnt = PAGE_ALIGN(layout->rw.size) >> PAGE_SHIFT;
+
+	layout->text.alloc = NULL;
+	layout->ro.alloc = NULL;
+	layout->ro_after_init.alloc = NULL;
+	layout->rw.alloc = NULL;
+
+	/*
+	 * Look for an already executable mapped region since at least some will
+	 * be executable.
+	 */
+	layout->text.alloc = perm_alloc(vstart, vend, text_page_cnt, PERM_RX);
+
+	if (!layout->text.alloc && layout->text.size)
+		goto out;
+	layout->ro.alloc = perm_alloc(vstart, vend, ro_page_cnt, PERM_R);
+	if (!layout->ro.alloc && layout->ro.size)
+		goto text_free_out;
+	layout->ro_after_init.alloc = perm_alloc(vstart, vend, ro_after_init_page_cnt, PERM_RW);
+	if (!layout->ro_after_init.alloc && layout->ro_after_init.size)
+		goto ro_free_out;
+	layout->rw.alloc = perm_alloc(vstart, vend, rw_page_cnt, PERM_RW);
+	if (!layout->rw.alloc && layout->rw.size)
+		goto ro_after_init_out;
+
+	return true;
+ro_after_init_out:
+	perm_free(layout->ro_after_init.alloc);
+ro_free_out:
+	perm_free(layout->ro.alloc);
+text_free_out:
+	perm_free(layout->text.alloc);
+out:
+	return false;
+}
+
+void module_perm_free(struct module_layout *layout)
+{
+	perm_free(layout->text.alloc);
+	perm_free(layout->ro.alloc);
+	perm_free(layout->ro_after_init.alloc);
+	perm_free(layout->rw.alloc);
+}
+
 #ifdef CONFIG_X86_32
 int apply_relocate(Elf32_Shdr *sechdrs,
 		   const char *strtab,
@@ -134,9 +185,11 @@ static int __apply_relocate_add(Elf64_Shdr *sechdrs,
 		   void *(*write)(void *dest, const void *src, size_t len))
 {
 	unsigned int i;
+	struct perm_allocation *alloc;
 	Elf64_Rela *rel = (void *)sechdrs[relsec].sh_addr;
 	Elf64_Sym *sym;
 	void *loc;
+	void *writable_loc;
 	u64 val;
 
 	DEBUGP("Applying relocate section %u to %u\n",
@@ -145,6 +198,9 @@ static int __apply_relocate_add(Elf64_Shdr *sechdrs,
 		/* This is where to make the change */
 		loc = (void *)sechdrs[sechdrs[relsec].sh_info].sh_addr
 			+ rel[i].r_offset;
+
+		alloc = module_get_allocation(me, (unsigned long)loc);
+		writable_loc = (void *)perm_writable_addr(alloc, (unsigned long)loc);
 
 		/* This is the symbol it is referring to.  Note that all
 		   undefined symbols have been resolved.  */
@@ -161,40 +217,40 @@ static int __apply_relocate_add(Elf64_Shdr *sechdrs,
 		case R_X86_64_NONE:
 			break;
 		case R_X86_64_64:
-			if (*(u64 *)loc != 0)
+			if (*(u64 *)writable_loc != 0)
 				goto invalid_relocation;
-			write(loc, &val, 8);
+			write(writable_loc, &val, 8);
 			break;
 		case R_X86_64_32:
-			if (*(u32 *)loc != 0)
+			if (*(u32 *)writable_loc != 0)
 				goto invalid_relocation;
-			write(loc, &val, 4);
-			if (val != *(u32 *)loc)
+			write(writable_loc, &val, 4);
+			if (val != *(u32 *)writable_loc)
 				goto overflow;
 			break;
 		case R_X86_64_32S:
-			if (*(s32 *)loc != 0)
+			if (*(s32 *)writable_loc != 0)
 				goto invalid_relocation;
-			write(loc, &val, 4);
-			if ((s64)val != *(s32 *)loc)
+			write(writable_loc, &val, 4);
+			if ((s64)val != *(s32 *)writable_loc)
 				goto overflow;
 			break;
 		case R_X86_64_PC32:
 		case R_X86_64_PLT32:
-			if (*(u32 *)loc != 0)
+			if (*(u32 *)writable_loc != 0)
 				goto invalid_relocation;
 			val -= (u64)loc;
-			write(loc, &val, 4);
+			write(writable_loc, &val, 4);
 #if 0
-			if ((s64)val != *(s32 *)loc)
+			if ((s64)val != *(s32 *)writable_loc)
 				goto overflow;
 #endif
 			break;
 		case R_X86_64_PC64:
-			if (*(u64 *)loc != 0)
+			if (*(u64 *)writable_loc != 0)
 				goto invalid_relocation;
 			val -= (u64)loc;
-			write(loc, &val, 8);
+			write(writable_loc, &val, 8);
 			break;
 		default:
 			pr_err("%s: Unknown rela relocation: %llu\n",
@@ -273,6 +329,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 		void *aseg = (void *)alt->sh_addr;
 		apply_alternatives(aseg, aseg + alt->sh_size);
 	}
+
 	if (locks && text) {
 		void *lseg = (void *)locks->sh_addr;
 		void *tseg = (void *)text->sh_addr;
