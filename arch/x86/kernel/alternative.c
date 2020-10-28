@@ -373,7 +373,7 @@ void __init_or_module noinline apply_alternatives(struct alt_instr *start,
 						  struct alt_instr *end)
 {
 	struct alt_instr *a;
-	u8 *instr, *replacement;
+	u8 *instr, *writ_instr, *replacement, *writ_replacement;
 	u8 insn_buff[MAX_PATCH_LEN];
 
 	DPRINTK("alt table %px, -> %px", start, end);
@@ -391,11 +391,13 @@ void __init_or_module noinline apply_alternatives(struct alt_instr *start,
 
 		instr = (u8 *)&a->instr_offset + a->instr_offset;
 		replacement = (u8 *)&a->repl_offset + a->repl_offset;
+		writ_instr = (u8 *)module_adjust_writable_addr(instr);
+		writ_replacement = (u8 *)module_adjust_writable_addr(replacement);
 		BUG_ON(a->instrlen > sizeof(insn_buff));
 		BUG_ON(a->cpuid >= (NCAPINTS + NBUGINTS) * 32);
 		if (!boot_cpu_has(a->cpuid)) {
 			if (a->padlen > 1)
-				optimize_nops(a, instr);
+				optimize_nops(a, writ_instr);
 
 			continue;
 		}
@@ -403,13 +405,13 @@ void __init_or_module noinline apply_alternatives(struct alt_instr *start,
 		DPRINTK("feat: %d*32+%d, old: (%pS (%px) len: %d), repl: (%px, len: %d), pad: %d",
 			a->cpuid >> 5,
 			a->cpuid & 0x1f,
-			instr, instr, a->instrlen,
+			writ_instr, instr, a->instrlen,
 			replacement, a->replacementlen, a->padlen);
 
 		DUMP_BYTES(instr, a->instrlen, "%px: old_insn: ", instr);
 		DUMP_BYTES(replacement, a->replacementlen, "%px: rpl_insn: ", replacement);
 
-		memcpy(insn_buff, replacement, a->replacementlen);
+		memcpy(insn_buff, writ_replacement, a->replacementlen);
 		insn_buff_sz = a->replacementlen;
 
 		/*
@@ -435,7 +437,7 @@ void __init_or_module noinline apply_alternatives(struct alt_instr *start,
 		}
 		DUMP_BYTES(insn_buff, insn_buff_sz, "%px: final_insn: ", instr);
 
-		text_poke_early(instr, insn_buff, insn_buff_sz);
+		text_poke_early(writ_instr, insn_buff, insn_buff_sz);
 	}
 }
 
@@ -496,6 +498,10 @@ void __init_or_module alternatives_smp_module_add(struct module *mod,
 						  void *text,  void *text_end)
 {
 	struct smp_alt_module *smp;
+	void *w_locks = module_adjust_writable_addr(locks);
+	void *w_locks_end = module_adjust_writable_addr(locks_end);
+	void *w_text = module_adjust_writable_addr(text);
+	void *w_text_end = module_adjust_writable_addr(text_end);
 
 	mutex_lock(&text_mutex);
 	if (!uniproc_patched)
@@ -522,7 +528,7 @@ void __init_or_module alternatives_smp_module_add(struct module *mod,
 
 	list_add_tail(&smp->next, &smp_alt_modules);
 smp_unlock:
-	alternatives_smp_unlock(locks, locks_end, text, text_end);
+	alternatives_smp_unlock(w_locks, w_locks_end, w_text, w_text_end);
 unlock:
 	mutex_unlock(&text_mutex);
 }
@@ -601,17 +607,18 @@ void __init_or_module apply_paravirt(struct paravirt_patch_site *start,
 
 	for (p = start; p < end; p++) {
 		unsigned int used;
+		void *writable = module_adjust_writable_addr(p->instr);
 
 		BUG_ON(p->len > MAX_PATCH_LEN);
 		/* prep the buffer with the original instructions */
-		memcpy(insn_buff, p->instr, p->len);
-		used = pv_ops.init.patch(p->type, insn_buff, (unsigned long)p->instr, p->len);
+		memcpy(insn_buff, writable, p->len);
+		used = pv_ops.init.patch(p->type, insn_buff, (unsigned long)writable, p->len);
 
 		BUG_ON(used > p->len);
 
 		/* Pad the rest with nops */
 		add_nops(insn_buff + used, p->len - used);
-		text_poke_early(p->instr, insn_buff, p->len);
+		text_poke_early(writable, insn_buff, p->len);
 	}
 }
 extern struct paravirt_patch_site __start_parainstructions[],
