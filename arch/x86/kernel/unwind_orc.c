@@ -238,8 +238,8 @@ static int orc_sort_cmp(const void *_a, const void *_b)
 void unwind_module_init(struct module *mod, void *_orc_ip, size_t orc_ip_size,
 			void *_orc, size_t orc_size)
 {
-	int *orc_ip = _orc_ip;
-	struct orc_entry *orc = _orc;
+	int *orc_ip = module_adjust_writable_addr(_orc_ip);
+	struct orc_entry *orc = module_adjust_writable_addr(_orc);
 	unsigned int num_entries = orc_ip_size / sizeof(int);
 
 	WARN_ON_ONCE(orc_ip_size % sizeof(int) != 0 ||
