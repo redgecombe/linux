@@ -63,6 +63,18 @@ static inline void __jump_label_transform(struct jump_entry *entry,
 					  int init)
 {
 	const void *opcode = __jump_label_set_jump_code(entry, type, init);
+	unsigned long addr = jump_entry_code(entry);
+	struct module *mod = __module_address(addr);
+	bool mod_writable = false;
+
+	if (mod) {
+		struct perm_allocation *alloc = module_get_allocation(mod, addr);
+
+		if (perm_is_writable(alloc)) {
+			addr = perm_writable_addr(alloc, addr);
+			mod_writable = true;
+		}
+	}
 
 	/*
 	 * As long as only a single processor is running and the code is still
@@ -74,9 +86,11 @@ static inline void __jump_label_transform(struct jump_entry *entry,
 	 * At the time the change is being done, just ignore whether we
 	 * are doing nop -> jump or jump -> nop transition, and assume
 	 * always nop being the 'currently valid' instruction
+	 *
+	 * If this is a module being loaded, text_poke_early can also be used.
 	 */
-	if (init || system_state == SYSTEM_BOOTING) {
-		text_poke_early((void *)jump_entry_code(entry), opcode,
+	if (init || system_state == SYSTEM_BOOTING || mod_writable) {
+		text_poke_early((void *)addr, opcode,
 				JUMP_LABEL_NOP_SIZE);
 		return;
 	}

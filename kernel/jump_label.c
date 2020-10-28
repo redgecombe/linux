@@ -595,7 +595,7 @@ static void __jump_label_mod_update(struct static_key *key)
  */
 void jump_label_apply_nops(struct module *mod)
 {
-	struct jump_entry *iter_start = mod->jump_entries;
+	struct jump_entry *iter_start = module_adjust_writable_addr(mod->jump_entries);
 	struct jump_entry *iter_stop = iter_start + mod->num_jump_entries;
 	struct jump_entry *iter;
 
