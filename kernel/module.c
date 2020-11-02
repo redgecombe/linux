@@ -2789,39 +2789,49 @@ static void add_kallsyms(struct module *mod, const struct load_info *info)
 	unsigned int i, ndst;
 	const Elf_Sym *src;
 	Elf_Sym *dst;
-	char *s;
+	char *s, *strtab_writ_core, *typetab_writ_core, *typetab_writ_init;
+	struct mod_kallsyms *kallsyms_init_writ;
 	Elf_Shdr *symsec = &info->sechdrs[info->index.sym];
 	void *core_rw = (void *)perm_alloc_address(mod->core_layout.rw.alloc);
 	void *init_rw = (void *)perm_alloc_address(mod->init_layout.rw.alloc);
 
 	/* Set up to point into init section. */
-	mod->kallsyms = mod->init_layout.base + info->mod_kallsyms_init_off;
+	mod->kallsyms = init_rw + info->mod_kallsyms_init_off;
+	/*
+	 * The init mod_kallsyms is tacked on the end of the init section itself, so need a
+	 * writable pointer.
+	 */
+	kallsyms_init_writ = module_adjust_writable_addr(mod->kallsyms);
 
-	mod->kallsyms->symtab = (void *)symsec->sh_addr;
-	mod->kallsyms->num_symtab = symsec->sh_size / sizeof(Elf_Sym);
+	kallsyms_init_writ->symtab = (void *)symsec->sh_addr;
+	kallsyms_init_writ->num_symtab = symsec->sh_size / sizeof(Elf_Sym);
 	/* Make sure we get permanent strtab: don't use info->strtab. */
-	mod->kallsyms->strtab = (void *)info->sechdrs[info->index.str].sh_addr;
-	mod->kallsyms->typetab = init_rw + info->init_typeoffs;
+	kallsyms_init_writ->strtab = (void *)info->sechdrs[info->index.str].sh_addr;
+	kallsyms_init_writ->typetab = init_rw + info->init_typeoffs;
 
 	/*
 	 * Now populate the cut down core kallsyms for after init
 	 * and set types up while we still have access to sections.
 	 */
-	mod->core_kallsyms.symtab = dst = core_rw + info->symoffs;
+	mod->core_kallsyms.symtab = core_rw + info->symoffs;
 	mod->core_kallsyms.strtab = s = core_rw + info->stroffs;
 	mod->core_kallsyms.typetab = core_rw + info->core_typeoffs;
-	src = mod->kallsyms->symtab;
-	for (ndst = i = 0; i < mod->kallsyms->num_symtab; i++) {
-		mod->kallsyms->typetab[i] = elf_type(src + i, info);
+
+	strtab_writ_core = module_adjust_writable_addr(mod->core_kallsyms.strtab);
+	typetab_writ_core = module_adjust_writable_addr(mod->core_kallsyms.typetab);
+	typetab_writ_init = module_adjust_writable_addr(kallsyms_init_writ->typetab);
+	dst = module_adjust_writable_addr(mod->core_kallsyms.symtab);
+	src = module_adjust_writable_addr(kallsyms_init_writ->symtab);
+
+	for (ndst = i = 0; i < kallsyms_init_writ->num_symtab; i++) {
+		typetab_writ_init[i] = elf_type(src + i, info);
 		if (i == 0 || is_livepatch_module(mod) ||
 		    is_core_symbol(src+i, info->sechdrs, info->hdr->e_shnum,
 				   info->index.pcpu)) {
-			mod->core_kallsyms.typetab[ndst] =
-			    mod->kallsyms->typetab[i];
+			typetab_writ_core[ndst] = typetab_writ_init[i];
 			dst[ndst] = src[i];
 			dst[ndst++].st_name = s - mod->core_kallsyms.strtab;
-			s += strlcpy(s, &mod->kallsyms->strtab[src[i].st_name],
-				     KSYM_NAME_LEN) + 1;
+			s += strlcpy(s, &strtab_writ_core[src[i].st_name], KSYM_NAME_LEN) + 1;
 		}
 	}
 	mod->core_kallsyms.num_symtab = ndst;
@@ -3457,7 +3467,7 @@ static int move_module(struct module *mod, struct load_info *info)
 	/* Transfer each section which specifies SHF_ALLOC */
 	pr_debug("final section addresses:\n");
 	for (i = 0; i < info->hdr->e_shnum; i++) {
-		void *dest;
+		void *dest, *wdest;
 		struct perm_allocation *alloc;
 		Elf_Shdr *shdr = &info->sechdrs[i];
 
@@ -3469,9 +3479,10 @@ static int move_module(struct module *mod, struct load_info *info)
 		else
 			alloc = get_alloc_from_layout(&mod->core_layout, shdr->sh_entsize);
 		dest = (void *)perm_alloc_address(alloc) + (shdr->sh_entsize & ~ALL_OFFSET_MASK);
+		wdest = (void *)perm_writable_addr(alloc, (unsigned long) dest);
 
 		if (shdr->sh_type != SHT_NOBITS)
-			memcpy(dest, (void *)shdr->sh_addr, shdr->sh_size);
+			memcpy(wdest, (void *)shdr->sh_addr, shdr->sh_size);
 		/* Update sh_addr to point to copy in image. */
 		shdr->sh_addr = (unsigned long)dest;
 		pr_debug("\t0x%lx %s\n",
@@ -3644,13 +3655,15 @@ int __weak module_finalize(const Elf_Ehdr *hdr,
 
 static int post_relocation(struct module *mod, const struct load_info *info)
 {
+	struct exception_table_entry *extable_writ = module_adjust_writable_addr(mod->extable);
+	void *pcpu = (void *)info->sechdrs[info->index.pcpu].sh_addr;
+	void *percpu_writ = module_adjust_writable_addr(pcpu);
+
 	/* Sort exception table now relocations are done. */
-	sort_extable(mod->extable, mod->extable + mod->num_exentries);
-
+	sort_extable(extable_writ, mod->extable + mod->num_exentries);
 	/* Copy relocated percpu area over. */
-	percpu_modcopy(mod, (void *)info->sechdrs[info->index.pcpu].sh_addr,
-		       info->sechdrs[info->index.pcpu].sh_size);
 
+	percpu_modcopy(mod, percpu_writ, info->sechdrs[info->index.pcpu].sh_size);
 	/* Setup kallsyms-specific fields. */
 	add_kallsyms(mod, info);
 
