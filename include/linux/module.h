@@ -26,6 +26,7 @@
 #include <linux/tracepoint-defs.h>
 #include <linux/srcu.h>
 #include <linux/static_call_types.h>
+#include <linux/vmalloc.h>
 
 #include <linux/percpu.h>
 #include <asm/module.h>
@@ -318,21 +319,30 @@ struct mod_tree_node {
 	struct latch_tree_node node;
 };
 
-struct module_layout {
-	/* The actual code + data. */
-	void *base;
-	/* Total size. */
+struct mod_alloc {
+	struct perm_allocation *alloc;
 	unsigned int size;
-	/* The size of the executable code.  */
-	unsigned int text_size;
-	/* Size of RO section of the module (text+rodata) */
-	unsigned int ro_size;
-	/* Size of RO after init section */
-	unsigned int ro_after_init_size;
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 	struct mod_tree_node mtn;
 #endif
+};
+
+struct module_layout {
+	/*
+	 * The start of the allocations for arch's that have
+	 * them as contiguous regions.
+	 */
+	void *base;
+
+	/* The actual code + data. */
+	struct mod_alloc text;
+	struct mod_alloc ro;
+	struct mod_alloc ro_after_init;
+	struct mod_alloc rw;
+
+	/* Total size. */
+	unsigned int size;
 };
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
@@ -562,19 +572,42 @@ bool is_module_address(unsigned long addr);
 bool __is_module_percpu_address(unsigned long addr, unsigned long *can_addr);
 bool is_module_percpu_address(unsigned long addr);
 bool is_module_text_address(unsigned long addr);
+struct perm_allocation *module_get_allocation(struct module *mod, unsigned long addr);
+bool module_perm_alloc(struct module_layout *layout);
+void module_perm_free(struct module_layout *layout);
+
+static inline void *module_adjust_writable_addr(void *addr)
+{
+	unsigned long laddr = (unsigned long)addr;
+	struct module *mod;
+
+	mutex_lock(&module_mutex);
+	mod = __module_address(laddr);
+	if (!mod) {
+		mutex_unlock(&module_mutex);
+		return addr;
+	}
+	mutex_unlock(&module_mutex);
+	/* The module shouldn't be going away if someone is trying to write to it */
+
+	return (void *)perm_writable_addr(module_get_allocation(mod, laddr), laddr);
+}
 
 static inline bool within_module_core(unsigned long addr,
 				      const struct module *mod)
 {
-	return (unsigned long)mod->core_layout.base <= addr &&
-	       addr < (unsigned long)mod->core_layout.base + mod->core_layout.size;
+	return within_perm_alloc(mod->core_layout.text.alloc, addr) ||
+		within_perm_alloc(mod->core_layout.ro.alloc, addr) ||
+		within_perm_alloc(mod->core_layout.ro_after_init.alloc, addr) ||
+		within_perm_alloc(mod->core_layout.rw.alloc, addr);
 }
 
 static inline bool within_module_init(unsigned long addr,
 				      const struct module *mod)
 {
-	return (unsigned long)mod->init_layout.base <= addr &&
-	       addr < (unsigned long)mod->init_layout.base + mod->init_layout.size;
+	return within_perm_alloc(mod->init_layout.text.alloc, addr) ||
+		within_perm_alloc(mod->init_layout.ro.alloc, addr) ||
+		within_perm_alloc(mod->init_layout.rw.alloc, addr);
 }
 
 static inline bool within_module(unsigned long addr, const struct module *mod)
