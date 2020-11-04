@@ -1954,6 +1954,19 @@ int set_memory_np_noalias(unsigned long addr, int numpages)
 					cpa_flags, NULL);
 }
 
+int set_memory_noalias_noflush(unsigned long addr, int numpages,
+			       pgprot_t mask_set, pgprot_t mask_clr)
+{
+	struct cpa_data cpa = { .vaddr = &addr,
+				.pgd = NULL,
+				.numpages = numpages,
+				.mask_set = mask_set,
+				.mask_clr = mask_clr,
+				.flags = CPA_NO_CHECK_ALIAS};
+
+	return __change_page_attr_set_clr(&cpa, 0);
+}
+
 int set_memory_4k(unsigned long addr, int numpages)
 {
 	return change_page_attr_set_clr(&addr, numpages, __pgprot(0),
