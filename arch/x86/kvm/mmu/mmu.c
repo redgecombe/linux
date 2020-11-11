@@ -3999,11 +3999,16 @@ static void
 __reset_rsvds_bits_mask(struct kvm_vcpu *vcpu,
 			struct rsvd_bits_validate *rsvd_check,
 			int maxphyaddr, int level, bool nx, bool gbpages,
-			bool pse, bool amd)
+			bool pse, bool amd, bool apply_stolen)
 {
+	struct kvm *kvm = vcpu->kvm;
 	u64 exb_bit_rsvd = 0;
 	u64 gbpages_bit_rsvd = 0;
 	u64 nonleaf_bit8_rsvd = 0;
+	u64 pt_64_table_rsvd = 0;
+
+	if (apply_stolen)
+		pt_64_table_rsvd = rsvd_for_page_tables(kvm);
 
 	rsvd_check->bad_mt_xwr = 0;
 
@@ -4041,46 +4046,44 @@ __reset_rsvds_bits_mask(struct kvm_vcpu *vcpu,
 		break;
 	case PT32E_ROOT_LEVEL:
 		rsvd_check->rsvd_bits_mask[0][2] =
-			rsvd_bits(maxphyaddr, 63) |
+			rsvd_bits(maxphyaddr, 63) | pt_64_table_rsvd |
 			rsvd_bits(5, 8) | rsvd_bits(1, 2);	/* PDPTE */
 		rsvd_check->rsvd_bits_mask[0][1] = exb_bit_rsvd |
-			rsvd_bits(maxphyaddr, 62);	/* PDE */
+			rsvd_bits(maxphyaddr, 62) |
+			pt_64_table_rsvd;	/* PDE */
 		rsvd_check->rsvd_bits_mask[0][0] = exb_bit_rsvd |
-			rsvd_bits(maxphyaddr, 62); 	/* PTE */
+			rsvd_bits(maxphyaddr, 62) | pt_64_table_rsvd;	/* PTE */
 		rsvd_check->rsvd_bits_mask[1][1] = exb_bit_rsvd |
 			rsvd_bits(maxphyaddr, 62) |
 			rsvd_bits(13, 20);		/* large page */
-		rsvd_check->rsvd_bits_mask[1][0] =
-			rsvd_check->rsvd_bits_mask[0][0];
+		rsvd_check->rsvd_bits_mask[1][0] = exb_bit_rsvd |
+			rsvd_bits(maxphyaddr, 62);
 		break;
 	case PT64_ROOT_5LEVEL:
 		rsvd_check->rsvd_bits_mask[0][4] = exb_bit_rsvd |
 			nonleaf_bit8_rsvd | rsvd_bits(7, 7) |
-			rsvd_bits(maxphyaddr, 51);
-		rsvd_check->rsvd_bits_mask[1][4] =
-			rsvd_check->rsvd_bits_mask[0][4];
-		fallthrough;
-	case PT64_ROOT_4LEVEL:
-		rsvd_check->rsvd_bits_mask[0][3] = exb_bit_rsvd |
+			rsvd_bits(maxphyaddr, 51) | pt_64_table_rsvd;
+		rsvd_check->rsvd_bits_mask[1][4] = exb_bit_rsvd |
 			nonleaf_bit8_rsvd | rsvd_bits(7, 7) |
 			rsvd_bits(maxphyaddr, 51);
-		rsvd_check->rsvd_bits_mask[0][2] = exb_bit_rsvd |
-			gbpages_bit_rsvd |
-			rsvd_bits(maxphyaddr, 51);
-		rsvd_check->rsvd_bits_mask[0][1] = exb_bit_rsvd |
-			rsvd_bits(maxphyaddr, 51);
-		rsvd_check->rsvd_bits_mask[0][0] = exb_bit_rsvd |
-			rsvd_bits(maxphyaddr, 51);
-		rsvd_check->rsvd_bits_mask[1][3] =
-			rsvd_check->rsvd_bits_mask[0][3];
-		rsvd_check->rsvd_bits_mask[1][2] = exb_bit_rsvd |
-			gbpages_bit_rsvd | rsvd_bits(maxphyaddr, 51) |
-			rsvd_bits(13, 29);
-		rsvd_check->rsvd_bits_mask[1][1] = exb_bit_rsvd |
-			rsvd_bits(maxphyaddr, 51) |
-			rsvd_bits(13, 20);		/* large page */
-		rsvd_check->rsvd_bits_mask[1][0] =
-			rsvd_check->rsvd_bits_mask[0][0];
+		fallthrough;
+	case PT64_ROOT_4LEVEL:
+		rsvd_check->rsvd_bits_mask[0][3] = exb_bit_rsvd | nonleaf_bit8_rsvd |
+			rsvd_bits(7, 7) | rsvd_bits(maxphyaddr, 51) | pt_64_table_rsvd;
+		rsvd_check->rsvd_bits_mask[0][2] = exb_bit_rsvd | gbpages_bit_rsvd |
+						   rsvd_bits(maxphyaddr, 51) |
+						   pt_64_table_rsvd;
+		rsvd_check->rsvd_bits_mask[0][1] = exb_bit_rsvd | rsvd_bits(maxphyaddr, 51) |
+						   pt_64_table_rsvd;
+		rsvd_check->rsvd_bits_mask[0][0] = exb_bit_rsvd | rsvd_bits(maxphyaddr, 51) |
+						   pt_64_table_rsvd;
+		rsvd_check->rsvd_bits_mask[1][3] = exb_bit_rsvd | nonleaf_bit8_rsvd |
+			rsvd_bits(7, 7) | rsvd_bits(maxphyaddr, 51);
+		rsvd_check->rsvd_bits_mask[1][2] = exb_bit_rsvd | gbpages_bit_rsvd |
+			rsvd_bits(13, 29) | rsvd_bits(maxphyaddr, 51);
+		rsvd_check->rsvd_bits_mask[1][1] = exb_bit_rsvd | rsvd_bits(13, 20) |
+						   rsvd_bits(maxphyaddr, 51);	/* large page */
+		rsvd_check->rsvd_bits_mask[1][0] = exb_bit_rsvd | rsvd_bits(maxphyaddr, 51);
 		break;
 	}
 }
@@ -4092,8 +4095,8 @@ static void reset_rsvds_bits_mask(struct kvm_vcpu *vcpu,
 				cpuid_maxphyaddr(vcpu), context->root_level,
 				context->nx,
 				guest_cpuid_has(vcpu, X86_FEATURE_GBPAGES),
-				is_pse(vcpu),
-				guest_cpuid_is_amd_or_hygon(vcpu));
+				is_pse(vcpu), guest_cpuid_is_amd_or_hygon(vcpu),
+				true);
 }
 
 static void
@@ -4162,7 +4165,7 @@ reset_shadow_zero_bits_mask(struct kvm_vcpu *vcpu, struct kvm_mmu *context)
 				shadow_phys_bits,
 				context->shadow_root_level, uses_nx,
 				guest_cpuid_has(vcpu, X86_FEATURE_GBPAGES),
-				is_pse(vcpu), true);
+				is_pse(vcpu), true, false);
 
 	if (!shadow_me_mask)
 		return;
@@ -4199,7 +4202,7 @@ reset_tdp_shadow_zero_bits_mask(struct kvm_vcpu *vcpu,
 					shadow_phys_bits,
 					context->shadow_root_level, false,
 					boot_cpu_has(X86_FEATURE_GBPAGES),
-					true, true);
+					true, true, false);
 	else
 		__reset_rsvds_bits_mask_ept(shadow_zero_check,
 					    shadow_phys_bits,
