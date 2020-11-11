@@ -247,4 +247,11 @@ static inline u32 stolen_to_pf_error(struct kvm *kvm, gpa_t gpa)
 	return 0;
 }
 
+/* Software reserved bits for non-leaf PTEs */
+static inline gpa_t rsvd_for_page_tables(struct kvm *kvm)
+{
+	/* There are currently no features with rsvd bits in non-leaf ptes */
+	return 0;
+}
+
 #endif

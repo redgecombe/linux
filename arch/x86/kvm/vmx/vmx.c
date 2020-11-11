@@ -5301,6 +5301,38 @@ static int handle_task_switch(struct kvm_vcpu *vcpu)
 			       reason, has_error_code, error_code);
 }
 
+static bool handle_stolen_access(struct kvm_vcpu *vcpu, gpa_t gpa, u64 error_code)
+{
+	bool pte_rsvd = (error_code & PFERR_GUEST_PAGE_MASK) &&
+			(gpa & rsvd_for_page_tables(vcpu->kvm));
+	int cpl = kvm_x86_ops.get_cpl(vcpu);
+	struct x86_exception fault;
+
+	if (!pte_rsvd)
+		return false;
+
+	/*
+	 * If we don't have a valid GVA in some situations like the guest attempting to load guest
+	 * PDPTEs to a stolen GPA bit, then just inject a GP.
+	 */
+	if (!(vcpu->arch.exit_qualification & EPT_VIOLATION_GVA_LINEAR_VALID)) {
+		kvm_inject_gp(vcpu, 0);
+		return true;
+	}
+
+	fault.error_code = PFERR_RSVD_MASK;
+	fault.error_code |= ((cpl == 3) ? PFERR_USER_MASK : 0);
+
+	fault.vector = PF_VECTOR;
+	fault.error_code_valid = true;
+	fault.nested_page_fault = false;
+	fault.address = vmcs_readl(GUEST_LINEAR_ADDRESS);
+	fault.async_page_fault = false;
+	kvm_inject_page_fault(vcpu, &fault);
+
+	return true;
+}
+
 static int handle_ept_violation(struct kvm_vcpu *vcpu)
 {
 	unsigned long exit_qualification;
@@ -5355,6 +5387,9 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	 */
 	if (unlikely(allow_smaller_maxphyaddr && kvm_vcpu_is_illegal_gpa(vcpu, gpa)))
 		return kvm_emulate_instruction(vcpu, 0);
+
+	if (unlikely(handle_stolen_access(vcpu, gpa, error_code)))
+		return 0;
 
 	return kvm_mmu_page_fault(vcpu, gpa & ~gpa_stolen_mask(vcpu->kvm), error_code, NULL, 0);
 }
