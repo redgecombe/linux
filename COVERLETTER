@@ -1,0 +1,157 @@
+This is a proposal to address some inefficiencies in how memory permissions
+are handled on vmalloc mappings. The way the interfaces are defined across
+vmalloc and cpa make it hard to fully address problems underneath the
+existing interfaces. So this creates a new interface in vmalloc that
+encapsulates what vmalloc memory permission usages need, but with more
+details handled on the back end to allow for optimizations and shared caches
+of resources. The genesis for this was this conversation[0] and many of the
+ideas were suggested by Andy Lutomirski. In its current state it takes module
+load's down to usually 1 kernel range shootdown, and BPF JIT load's down to
+usually zero. It also minimizes the direct map 4k breakage when possible.
+
+For the future, x86 also has new kernel memory permission types that would
+benefit from efficiently handling the direct map permissions/unmapping, for
+example [1]. However, this patchset is just targeting improving performance
+inefficiencies with existing usages in modules and normal eBPF JITs.
+
+The Problem
+===========
+
+For a little background, the way executable code is loaded (modules, BPF
+JITs, etc) on x86 goes something like this:
+
+ptr = vmalloc_node_range(, PAGE_KERNEL)
+   alloc_page() - Get random pages from page allocator
+   map_kernel_range() - Map vmalloc range allocation as RW to those pages
+
+set_memory_ro(ptr)
+   set vmalloc alias to RO, break direct map aliases to 4k/RO, all-cpu shootdown
+   vm_unmap_alias() flush any lazy RW aliases to now RO pages, all-cpu shootdown
+
+set_memory_x(ptr)
+   set vmalloc alias to not-NX, all-cpu shootdown
+   vm_unmap_alias(), possible all-cpu shootdown
+
+
+So during this load operation, 4 shootdowns may take place and the direct map
+will be broken to 4k pages for whichever random pages got used in the
+executable region. The two reasons for this are having to change the direct
+map for each page, and having to change the permission of the vmalloc mapping
+several times in order to load it while it's writable, and then transition it
+to its final permission. Ideally we would unmap pages from the direct map in
+bulk to share a shootdown. For changing the vmalloc mappings permission, we
+should instead map it at it's final permission from the start and user a
+per-cpu mapping such as text_poke() to load the data such that it only
+requires a local TLB flush.
+
+For large page breakage on the direct map, if multiple JITs happen to get
+pages from the same 2MB physical region this can limit the damage to a
+smaller region. However, currently this depends on lucky physical distance of
+the pages picked inside vmalloc. Today it seems more likely to happen if
+allocations are made close together in time. Ideally we would make an effort
+to group pages used for permissioned vmallocs together physically so the
+direct map breakage would be minimized.
+
+But trying to improve this doesn't fit into the existing interfaces very well.
+
+- vmalloc_node_range() doesn't know what it's final permission will be if any.
+
+- There isn't any cross-arch way to describe to vmalloc what the permissions
+will be, since permissions are encoded into the name of the set_memory_foo()
+functions.
+
+- text_poke() only exists on x86, and other HW ways of temporarily writing to
+RO mappings don't necessarily have standardized semantics (example: toggling
+CR0 or using PKS).
+
+Proposed solution
+=================
+
+For text or RO allocations, to oversimplify, what usages want to do is just
+say:
+
+1. Give me a kva for this special particular permission
+2. Load this data into it
+3. Make it "live" (no writable mapping, no direct map mapping, whatever
+permission are set on it and ready to go)
+
+So this implements a new interface to do just that. I had in mind this
+interface should try to support the following optimizations on x86 even if
+they weren't implemented right away.
+
+1. Draw from 2MB physical pages that can be unmapped from the direct map in
+contiguous chunks
+
+In memory pressure situations a shrinker callback can reclaim unused pages
+from the cache which can get re-mapped on the fly without any flush since the
+direct map would be transitioning NP->RW. Since we can re-map the direct map
+cheaply, it's better to unmap more than we need. This part is close to
+secretmem[2] in implementation, and should probably share infrastructure or
+caches of unmapped pages.
+
+2. Load text/special data via per-cpu mappings
+
+The mapping can be mapped in its "final" permission, and loaded via
+text_poke(). This will reduce shootdowns during loads to zero is most cases.
+Just local flushes. The new interface provides a writable buffer for usages
+to stage their changes, and trigger the copying into the RO mapping via
+text_poke()
+
+3. Caching of virtual mappings as well as pages
+
+Normally executable mappings need to be zapped and flushed before the pages
+return to the page allocator to prevent random other memory that uses the
+page later from having an executable alias. But we could cache these live
+mappings and delay the flush until the page is needed for an allocation of a
+larger size or different permission. The "free" operations could just zero it
+with a per-cpu mapping to prevent unwanted text from remaining mapped.
+
+4. 2MB module space mappings
+
+It would be nice if the virtual mappings of the same permission types could
+share 2MB pages. This way we could have modules or PKS memory have 2MB pages.
+Of course allocating from a 2MB block could cause internal fragmentation and
+wasted memory, however it might be possible to to break the virtual mapping
+later and allow the wasted memory to be unmapped and freed in the formerly
+2MB page. Often a bunch of modules are loaded at boot. If we placed the long
+lived "core sections" of these modules sequentially into the 2MB blocks,
+there is probably a good chance we could get some decent utilization out of
+one.
+
+
+This RFC just has 1 and 2 actually implemented on x86.
+
+Module loader changes
+=====================
+Of the text allocation usages kernel modules are the most complex because a
+single allocation has many memory permissions across it (RO+X for the text,
+RO, RO after init, and RW). In addition to this preventing having modules
+text mapped in 2MB pages since the text is all scattered around in different
+allocations, it would require more complexity for the new interface.
+
+However, at least for x86, it doesn't seem like there is any requirement for
+a modules allocations to be virtually contiguous. Instead we could have the
+module loader treat each of its 4 permission regions as separate allocations.
+Then the new interface could be simpler and the it could have the option of
+putting similar permission allocations next to each other to achieve 2MB
+pages or more opportunities to reuse existing mappings.
+
+The challenge in changing this in the module loader is that most of it is
+cross-arch code and there could be relocation rules required by various
+arch's that depend on the existing virtual address distances. To try to
+transition to this interface without disturbing anything, the default
+module.c behavior is to layout the modules as they were before in both
+location and permissions, but wrapped as the new type of allocation. This way
+it could have no functional change for other architectures at first, but
+allow any to implement similar optimizations in the arch module.c breakouts.
+So this RFC also looks at handling things as separate allocations, and
+actually allocates them separately for x86.
+
+Of course, there are several areas outside of modules that are involved in
+modifying the module text and data such as alternatives, orc unwinding, etc.
+These components are changed to be aware they may need to opearate on the
+writable staging area buffer.
+
+[0] https://lore.kernel.org/lkml/CALCETrV_tGk=B3Hw0h9viW45wMqB_W+rwWzx6LnC3-vSATOUOA@mail.gmail.com/
+[1] https://lore.kernel.org/lkml/20201009201410.3209180-1-ira.weiny@intel.com/
+[2] https://lore.kernel.org/lkml/20200924132904.1391-1-rppt@kernel.org/
