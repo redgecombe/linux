@@ -349,19 +349,19 @@ static inline void tdp_mmu_set_spte_no_dirty_log(struct kvm *kvm,
 	__tdp_mmu_set_spte(kvm, iter, new_spte, true, false);
 }
 
-#define tdp_root_for_each_pte(_iter, _root, _start, _end) \
-	for_each_tdp_pte(_iter, _root->spt, _root->role.level, _start, _end)
+#define tdp_root_for_each_pte(_kvm, _iter, _root, _start, _end) \
+	for_each_tdp_pte(_iter, _root->spt, _root->role.level, _start, _end, 0ULL, gpa_stolen_mask(_kvm) >> PAGE_SHIFT)
 
-#define tdp_root_for_each_leaf_pte(_iter, _root, _start, _end)	\
-	tdp_root_for_each_pte(_iter, _root, _start, _end)		\
+#define tdp_root_for_each_leaf_pte(_kvm, _iter, _root, _start, _end)	\
+	tdp_root_for_each_pte(_kvm, _iter, _root, _start, _end)		\
 		if (!is_shadow_present_pte(_iter.old_spte) ||		\
 		    !is_last_spte(_iter.old_spte, _iter.level))		\
 			continue;					\
 		else
 
-#define tdp_mmu_for_each_pte(_iter, _mmu, _start, _end)		\
+#define tdp_mmu_for_each_alias_pte(_iter, _mmu, _alias, _start, _end)		\
 	for_each_tdp_pte(_iter, __va(_mmu->root_hpa),		\
-			 _mmu->shadow_root_level, _start, _end)
+			 _mmu->shadow_root_level, _start, _end, _alias, _alias)
 
 /*
  * Flush the TLB if the process should drop kvm->mmu_lock.
@@ -404,7 +404,7 @@ static bool zap_gfn_range(struct kvm *kvm, struct kvm_mmu_page *root,
 	struct tdp_iter iter;
 	bool flush_needed = false;
 
-	tdp_root_for_each_pte(iter, root, start, end) {
+	tdp_root_for_each_pte(kvm, iter, root, start, end) {
 		if (!is_shadow_present_pte(iter.old_spte))
 			continue;
 
@@ -521,6 +521,7 @@ int kvm_tdp_mmu_map(struct kvm_vcpu *vcpu, gpa_t gpa, u32 error_code,
 		    int map_writable, int max_level, kvm_pfn_t pfn,
 		    bool prefault)
 {
+	gfn_t gfn_stolen_bits = gpa_to_gfn(pf_error_to_stolen(vcpu->kvm, error_code));
 	bool nx_huge_page_workaround_enabled = is_nx_huge_page_enabled();
 	bool write = error_code & PFERR_WRITE_MASK;
 	bool exec = error_code & PFERR_FETCH_MASK;
@@ -544,7 +545,7 @@ int kvm_tdp_mmu_map(struct kvm_vcpu *vcpu, gpa_t gpa, u32 error_code,
 					huge_page_disallowed, &req_level);
 
 	trace_kvm_mmu_spte_requested(gpa, level, pfn);
-	tdp_mmu_for_each_pte(iter, mmu, gfn, gfn + 1) {
+	tdp_mmu_for_each_alias_pte(iter, mmu, gfn_stolen_bits, gfn, gfn + 1) {
 		if (nx_huge_page_workaround_enabled)
 			disallowed_hugepage_adjust(iter.old_spte, gfn,
 						   iter.level, &pfn, &level);
@@ -671,7 +672,7 @@ static int age_gfn_range(struct kvm *kvm, struct kvm_memory_slot *slot,
 	int young = 0;
 	u64 new_spte = 0;
 
-	tdp_root_for_each_leaf_pte(iter, root, start, end) {
+	tdp_root_for_each_leaf_pte(kvm, iter, root, start, end) {
 		/*
 		 * If we have a non-accessed entry we don't need to change the
 		 * pte.
@@ -716,7 +717,7 @@ static int test_age_gfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 {
 	struct tdp_iter iter;
 
-	tdp_root_for_each_leaf_pte(iter, root, gfn, gfn + 1)
+	tdp_root_for_each_leaf_pte(kvm, iter, root, gfn, gfn + 1)
 		if (is_accessed_spte(iter.old_spte))
 			return 1;
 
@@ -749,7 +750,7 @@ static int set_tdp_spte(struct kvm *kvm, struct kvm_memory_slot *slot,
 
 	new_pfn = pte_pfn(*ptep);
 
-	tdp_root_for_each_pte(iter, root, gfn, gfn + 1) {
+	tdp_root_for_each_pte(kvm, iter, root, gfn, gfn + 1) {
 		if (iter.level != PG_LEVEL_4K)
 			continue;
 
@@ -799,7 +800,7 @@ static bool wrprot_gfn_range(struct kvm *kvm, struct kvm_mmu_page *root,
 	BUG_ON(min_level > KVM_MAX_HUGEPAGE_LEVEL);
 
 	for_each_tdp_pte_min_level(iter, root->spt, root->role.level,
-				   min_level, start, end) {
+				   min_level, start, end, 0ULL, gpa_stolen_mask(kvm) >> PAGE_SHIFT) {
 		if (!is_shadow_present_pte(iter.old_spte) ||
 		    !is_last_spte(iter.old_spte, iter.level))
 			continue;
@@ -860,7 +861,7 @@ static bool clear_dirty_gfn_range(struct kvm *kvm, struct kvm_mmu_page *root,
 	u64 new_spte;
 	bool spte_set = false;
 
-	tdp_root_for_each_leaf_pte(iter, root, start, end) {
+	tdp_root_for_each_leaf_pte(kvm, iter, root, start, end) {
 		if (spte_ad_need_write_protect(iter.old_spte)) {
 			if (is_writable_pte(iter.old_spte))
 				new_spte = iter.old_spte & ~PT_WRITABLE_MASK;
@@ -927,7 +928,7 @@ static void clear_dirty_pt_masked(struct kvm *kvm, struct kvm_mmu_page *root,
 	struct tdp_iter iter;
 	u64 new_spte;
 
-	tdp_root_for_each_leaf_pte(iter, root, gfn + __ffs(mask),
+	tdp_root_for_each_leaf_pte(kvm, iter, root, gfn + __ffs(mask),
 				    gfn + BITS_PER_LONG) {
 		if (!mask)
 			break;
@@ -991,7 +992,7 @@ static bool set_dirty_gfn_range(struct kvm *kvm, struct kvm_mmu_page *root,
 	u64 new_spte;
 	bool spte_set = false;
 
-	tdp_root_for_each_pte(iter, root, start, end) {
+	tdp_root_for_each_pte(kvm, iter, root, start, end) {
 		if (!is_shadow_present_pte(iter.old_spte))
 			continue;
 
@@ -1048,7 +1049,7 @@ static void zap_collapsible_spte_range(struct kvm *kvm,
 	kvm_pfn_t pfn;
 	bool spte_set = false;
 
-	tdp_root_for_each_pte(iter, root, start, end) {
+	tdp_root_for_each_pte(kvm, iter, root, start, end) {
 		if (!is_shadow_present_pte(iter.old_spte) ||
 		    is_last_spte(iter.old_spte, iter.level))
 			continue;
@@ -1107,7 +1108,7 @@ static bool write_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 	u64 new_spte;
 	bool spte_set = false;
 
-	tdp_root_for_each_leaf_pte(iter, root, gfn, gfn + 1) {
+	tdp_root_for_each_leaf_pte(kvm, iter, root, gfn, gfn + 1) {
 		if (!is_writable_pte(iter.old_spte))
 			break;
 
@@ -1148,14 +1149,15 @@ bool kvm_tdp_mmu_write_protect_gfn(struct kvm *kvm,
  * Return the level of the lowest level SPTE added to sptes.
  * That SPTE may be non-present.
  */
-int kvm_tdp_mmu_get_walk(struct kvm_vcpu *vcpu, u64 addr, u64 *sptes)
+int kvm_tdp_mmu_get_walk(struct kvm_vcpu *vcpu, u64 stolen, u64 addr, u64 *sptes)
 {
 	struct tdp_iter iter;
 	struct kvm_mmu *mmu = vcpu->arch.mmu;
 	int leaf = vcpu->arch.mmu->shadow_root_level;
 	gfn_t gfn = addr >> PAGE_SHIFT;
+	gfn_t gfn_stolen = stolen >> PAGE_SHIFT;
 
-	tdp_mmu_for_each_pte(iter, mmu, gfn, gfn + 1) {
+	tdp_mmu_for_each_alias_pte(iter, mmu, gfn_stolen, gfn, gfn + 1) {
 		leaf = iter.level;
 		sptes[leaf - 1] = iter.old_spte;
 	}

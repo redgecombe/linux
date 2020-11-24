@@ -11,7 +11,7 @@
 static void tdp_iter_refresh_sptep(struct tdp_iter *iter)
 {
 	iter->sptep = iter->pt_path[iter->level - 1] +
-		SHADOW_PT_INDEX(iter->gfn << PAGE_SHIFT, iter->level);
+		SHADOW_PT_INDEX((iter->stolen | iter->gfn) << PAGE_SHIFT, iter->level);
 	iter->old_spte = READ_ONCE(*iter->sptep);
 }
 
@@ -101,7 +101,7 @@ static bool try_step_side(struct tdp_iter *iter)
 	 * Check if the iterator is already at the end of the current page
 	 * table.
 	 */
-	if (SHADOW_PT_INDEX(iter->gfn << PAGE_SHIFT, iter->level) ==
+	if (SHADOW_PT_INDEX((iter->stolen | iter->gfn) << PAGE_SHIFT, iter->level) ==
             (PT64_ENT_PER_PAGE - 1))
 		return false;
 

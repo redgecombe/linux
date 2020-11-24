@@ -35,19 +35,33 @@ struct tdp_iter {
 	 * iterator walks off the end of the paging structure.
 	 */
 	bool valid;
+
+	/* The current alias being traversed */
+	gfn_t stolen;
 };
 
+#define for_each_tdp_alias(iter, start_alias, end_alias)	\
+	/* Currently only a single alias is supported */	\
+	WARN_ON(hweight64(start_alias) > 1);			\
+	WARN_ON(hweight64(end_alias) > 1);			\
+	WARN_ON(hweight64((start_alias) ^ (end_alias)) > 1);	\
+	for (iter.stolen = start_alias;				\
+	     iter.stolen <= end_alias;				\
+	     iter.stolen += max((u64)(end_alias), (u64)1))
 /*
  * Iterates over every SPTE mapping the GFN range [start, end) in a
- * preorder traversal.
+ * preorder traversal, for each of the aliases in the range
+ * [start_alias, end_alias]. All of the ranges are inclusive except
+ * for "end".
  */
-#define for_each_tdp_pte_min_level(iter, root, root_level, min_level, start, end) \
-	for (tdp_iter_start(&iter, root, root_level, min_level, start); \
-	     iter.valid && iter.gfn < end;		     \
-	     tdp_iter_next(&iter))
+#define for_each_tdp_pte_min_level(iter, root, root_level, min_level, start, end, start_alias, end_alias) \
+	for_each_tdp_alias(iter, start_alias, end_alias)						  \
+		for (tdp_iter_start(&iter, root, root_level, min_level, iter.stolen | (start));		  \
+		     iter.valid && (iter.stolen | iter.gfn) < (iter.stolen | (end));			  \
+		     tdp_iter_next(&iter))
 
-#define for_each_tdp_pte(iter, root, root_level, start, end) \
-	for_each_tdp_pte_min_level(iter, root, root_level, PG_LEVEL_4K, start, end)
+#define for_each_tdp_pte(iter, root, root_level, start, end, start_alias, end_alias) \
+	for_each_tdp_pte_min_level(iter, root, root_level, PG_LEVEL_4K, start, end, start_alias, end_alias)
 
 u64 *spte_to_child_pt(u64 pte, int level);
 

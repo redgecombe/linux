@@ -3553,7 +3553,7 @@ static bool get_mmio_spte(struct kvm_vcpu *vcpu, u64 addr, u32 error_code, u64 *
 	}
 
 	if (is_tdp_mmu_root(vcpu->kvm, vcpu->arch.mmu->root_hpa))
-		leaf = kvm_tdp_mmu_get_walk(vcpu, addr, sptes);
+		leaf = kvm_tdp_mmu_get_walk(vcpu, pf_error_to_stolen(vcpu->kvm, error_code), addr, sptes);
 	else
 		leaf = get_walk(vcpu, addr | pf_error_to_stolen(vcpu->kvm, error_code), sptes);
 
