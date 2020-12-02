@@ -8,7 +8,7 @@
 #include "spte.h"
 
 #ifdef CONFIG_X86_64
-static bool __read_mostly tdp_mmu_enabled = false;
+static bool __read_mostly tdp_mmu_enabled = true;
 module_param_named(tdp_mmu, tdp_mmu_enabled, bool, 0644);
 #endif
 
