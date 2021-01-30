@@ -415,6 +415,24 @@ extern unsigned int kobjsize(const void *objp);
 #endif
 #define VM_FLAGS_CLEAR	(ARCH_VM_PKEY_FLAGS | VM_ARCH_CLEAR)
 
+/* Index into protection_map */
+#define P000	0
+#define P001	1
+#define P010	2
+#define P011	3
+#define P100	4
+#define P101	5
+#define P110	6
+#define P111	7
+#define S000	8
+#define S001	9
+#define S010	10
+#define S011	11
+#define S100	12
+#define S101	13
+#define S110	14
+#define S111	15
+
 /*
  * mapping from the currently active vm_flags protection bits (the
  * low four bits) to a page protection mask..

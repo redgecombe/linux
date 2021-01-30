@@ -95,8 +95,22 @@ static void unmap_region(struct mm_struct *mm,
  *		x: (no) no	x: (no) yes	x: (no) yes	x: (yes) yes
  */
 pgprot_t protection_map[16] __ro_after_init = {
-	__P000, __P001, __P010, __P011, __P100, __P101, __P110, __P111,
-	__S000, __S001, __S010, __S011, __S100, __S101, __S110, __S111
+	[P000] = __P000,
+	[P001] = __P001,
+	[P010] = __P010,
+	[P011] = __P011,
+	[P100] = __P100,
+	[P101] = __P101,
+	[P110] = __P110,
+	[P111] = __P111,
+	[S000] = __S000,
+	[S001] = __S001,
+	[S010] = __S010,
+	[S011] = __S011,
+	[S100] = __S100,
+	[S101] = __S101,
+	[S110] = __S110,
+	[S111] = __S111
 };
 
 #ifndef CONFIG_ARCH_HAS_FILTER_PGPROT
