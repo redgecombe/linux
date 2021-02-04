@@ -571,6 +571,8 @@ int arch_phys_wc_add(unsigned long base, unsigned long size)
 	if (pat_enabled() || !mtrr_enabled())
 		return 0;  /* Success!  (We don't need to do anything.) */
 
+	WARN_ON((base + size) & (~0ULL << boot_cpu_data.x86_phys_bits));
+
 	ret = mtrr_add(base, size, MTRR_TYPE_WRCOMB, true);
 	if (ret < 0) {
 		pr_warn("Failed to add WC MTRR for [%p-%p]; performance may suffer.",
@@ -688,45 +690,12 @@ int __initdata changed_by_mtrr_cleanup;
  */
 void __init mtrr_bp_init(void)
 {
-	u32 phys_addr;
-
 	init_ifs();
-
-	phys_addr = 32;
 
 	if (boot_cpu_has(X86_FEATURE_MTRR)) {
 		mtrr_if = &generic_mtrr_ops;
-		size_or_mask = SIZE_OR_MASK_BITS(36);
-		size_and_mask = 0x00f00000;
-		phys_addr = 36;
-
-		/*
-		 * This is an AMD specific MSR, but we assume(hope?) that
-		 * Intel will implement it too when they extend the address
-		 * bus of the Xeon.
-		 */
-		if (cpuid_eax(0x80000000) >= 0x80000008) {
-			phys_addr = cpuid_eax(0x80000008) & 0xff;
-			/* CPUID workaround for Intel 0F33/0F34 CPU */
-			if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL &&
-			    boot_cpu_data.x86 == 0xF &&
-			    boot_cpu_data.x86_model == 0x3 &&
-			    (boot_cpu_data.x86_stepping == 0x3 ||
-			     boot_cpu_data.x86_stepping == 0x4))
-				phys_addr = 36;
-
-			size_or_mask = SIZE_OR_MASK_BITS(phys_addr);
-			size_and_mask = ~size_or_mask & 0xfffff00000ULL;
-		} else if (boot_cpu_data.x86_vendor == X86_VENDOR_CENTAUR &&
-			   boot_cpu_data.x86 == 6) {
-			/*
-			 * VIA C* family have Intel style MTRRs,
-			 * but don't support PAE
-			 */
-			size_or_mask = SIZE_OR_MASK_BITS(32);
-			size_and_mask = 0;
-			phys_addr = 32;
-		}
+		size_or_mask = SIZE_OR_MASK_BITS(boot_cpu_data.x86_phys_bits);
+		size_and_mask = ~size_or_mask & 0xfffff00000ULL;
 	} else {
 		switch (boot_cpu_data.x86_vendor) {
 		case X86_VENDOR_AMD:
@@ -767,7 +736,7 @@ void __init mtrr_bp_init(void)
 			if (mtrr_enabled())
 				mtrr_bp_pat_init();
 
-			if (mtrr_cleanup(phys_addr)) {
+			if (mtrr_cleanup(boot_cpu_data.x86_phys_bits)) {
 				changed_by_mtrr_cleanup = 1;
 				mtrr_if->set_all();
 			}
